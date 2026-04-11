@@ -7,6 +7,7 @@ protocol PreferencesServicing: Sendable {
 
 struct AppPreferences: Codable, Equatable, Sendable {
     var loadSelectedProfileAtStartup: Bool = false
+    var startupProfileID: UUID?
     var autoReapplyOnReconnect: Bool = true
     var autoReapplyAfterWake: Bool = true
     var showUnsupportedControls: Bool = false

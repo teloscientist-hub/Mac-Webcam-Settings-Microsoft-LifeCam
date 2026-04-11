@@ -24,7 +24,7 @@ actor ProfileApplyCoordinator: ProfileApplying {
         var results: [ProfileApplyResult.ItemResult] = []
 
         for (key, value) in orderedValues {
-            let result = await writeCoordinator.write(value, key: key, device: device)
+            let result = await writeCoordinator.write(value, key: key, capability: nil, device: device)
             switch result {
             case .success:
                 results.append(.init(key: key, status: .applied, message: "Applied"))

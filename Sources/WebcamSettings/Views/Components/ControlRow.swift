@@ -2,25 +2,29 @@ import SwiftUI
 
 struct ControlRow: View {
     let capability: CameraControlCapability
-    let currentValue: CameraControlValue?
+    let currentValues: [CameraControlKey: CameraControlValue]
+    let isWriting: Bool
+    let errorMessage: String?
     let onWrite: (CameraControlKey, CameraControlValue) -> Void
 
     var body: some View {
         switch capability.type {
         case .boolean:
-            Toggle(capability.displayName, isOn: Binding(
-                get: { boolValue ?? false },
-                set: { onWrite(capability.key, .bool($0)) }
-            ))
-            .padding(12)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+            ToggleControlRow(
+                title: capability.displayName,
+                isOn: boolValue ?? false,
+                isEnabled: isEnabled && !isWriting,
+                helperText: statusText,
+                onChange: { onWrite(capability.key, .bool($0)) }
+            )
 
         case .enumSelection:
             EnumSelectorRow(
                 title: capability.displayName,
                 options: capability.enumOptions,
                 selectedValue: enumValue ?? capability.enumOptions.first?.value ?? "",
-                isEnabled: true,
+                isEnabled: isEnabled && !isWriting,
+                helperText: statusText,
                 onChange: { onWrite(capability.key, .enumCase($0)) }
             )
 
@@ -29,8 +33,18 @@ struct ControlRow: View {
                 title: capability.displayName,
                 value: numericValue,
                 range: numericRange,
-                isEnabled: true,
-                onChange: { onWrite(capability.key, .double($0)) }
+                isEnabled: isEnabled && !isWriting,
+                helperText: statusText,
+                onChange: { value in
+                    switch capability.type {
+                    case .integerRange:
+                        onWrite(capability.key, .int(Int(value.rounded())))
+                    case .floatRange:
+                        onWrite(capability.key, .double(value))
+                    case .boolean, .enumSelection:
+                        break
+                    }
+                }
             )
         }
     }
@@ -90,5 +104,30 @@ struct ControlRow: View {
         }
 
         return minValue ... maxValue
+    }
+
+    private var currentValue: CameraControlValue? {
+        currentValues[capability.key]
+    }
+
+    private var isEnabled: Bool {
+        !(capability.dependency?.isDisabled(using: currentValues) ?? false)
+    }
+
+    private var helperText: String? {
+        guard let dependency = capability.dependency, !isEnabled else {
+            return nil
+        }
+        return dependency.reason
+    }
+
+    private var statusText: String? {
+        if let errorMessage {
+            return errorMessage
+        }
+        if isWriting {
+            return "Applying change..."
+        }
+        return helperText
     }
 }

@@ -19,6 +19,11 @@ actor ProfileService: ProfileServicing {
 
     func saveProfile(_ profile: CameraProfile) async throws {
         var profiles = try await store.loadProfiles()
+        if profile.loadAtStart {
+            for index in profiles.indices {
+                profiles[index].loadAtStart = false
+            }
+        }
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {

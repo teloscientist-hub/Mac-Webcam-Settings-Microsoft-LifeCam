@@ -6,6 +6,7 @@ struct SliderControlRow: View {
     let value: Double
     let range: ClosedRange<Double>
     let isEnabled: Bool
+    let helperText: String?
     let onChange: (Double) -> Void
 
     var body: some View {
@@ -25,6 +26,12 @@ struct SliderControlRow: View {
                 in: range
             )
                 .disabled(!isEnabled)
+
+            if let helperText {
+                Text(helperText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(12)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))

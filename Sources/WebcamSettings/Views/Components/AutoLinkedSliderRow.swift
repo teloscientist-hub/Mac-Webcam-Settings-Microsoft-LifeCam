@@ -24,6 +24,7 @@ struct AutoLinkedSliderRow: View {
                 value: sliderValue,
                 range: range,
                 isEnabled: !isAutomatic,
+                helperText: nil,
                 onChange: onSlide
             )
         }
