@@ -1,0 +1,302 @@
+# UX Implementation Instructions for Coding Agent
+
+## Purpose
+
+This file tells the coding agent how to implement the user experience defined in `docs/ux-spec.md` and how it relates to `docs/master-project-spec.md`.
+
+The agent must treat:
+- `docs/master-project-spec.md` as the governing product and architecture specification
+- `docs/ux-spec.md` as the governing interface and interaction specification
+
+If there is tension between implementation convenience and UX clarity, prefer the UX behavior described in `docs/ux-spec.md`, as long as it does not violate the architectural constraints in `docs/master-project-spec.md`.
+
+---
+
+## 1. Required reading order
+
+Before implementing UI, read in this order:
+
+1. `docs/master-project-spec.md`
+2. `docs/ux-spec.md`
+
+The first defines the system.  
+The second defines how that system should appear and behave for the user.
+
+---
+
+## 2. Primary implementation goal
+
+Build a native macOS utility interface that feels:
+- compact
+- stable
+- obvious
+- low-friction
+- capability-aware
+
+Do not invent a novel interface pattern when a straightforward native macOS pattern will work.
+
+---
+
+## 3. Required high-level window layout
+
+Implement a single main window with three regions:
+
+### Top bar
+- device selector
+- connection/status indicator
+- optional refresh/reconnect action
+
+### Main content area
+Two-column layout:
+- left: live preview panel
+- right: tabbed controls
+
+### Bottom bar
+- profile selector
+- Save New Profile
+- Update Profile
+- Delete Profile
+- Load at Start toggle
+
+Do not move profile controls into Preferences.
+Do not hide device selection inside a submenu.
+Do not make the preview a secondary screen.
+
+---
+
+## 4. Required tabs
+
+Implement exactly these tabs:
+- Basic
+- Advanced
+- Preferences
+
+Default tab on launch:
+- Basic
+
+---
+
+## 5. Required control grouping
+
+### Basic tab sections
+- Exposure
+- Image
+- White Balance
+
+### Advanced tab sections
+- Lighting
+- Focus
+- PTZ
+
+### Preferences tab
+App behavior settings only
+
+Do not mix Preferences settings into camera-control sections.
+
+---
+
+## 6. Required interaction patterns
+
+### Control writes
+- apply live when changed
+- reflect success/failure in status state
+- do not require separate Apply button for normal control adjustment
+
+### Auto/manual dependencies
+- dependent controls remain visible
+- dependent controls become disabled when auto mode is enabled
+- current value should remain visible where practical
+
+### Unsupported controls
+- hide by default
+- optionally show when debug/support mode is enabled
+
+### Errors
+- prefer inline or lightweight status messaging
+- avoid modal alerts except for destructive confirmation
+
+---
+
+## 7. Required reusable UI components
+
+Implement reusable components for:
+
+- device selector header
+- preview panel
+- tab selector
+- grouped section container
+- slider control row
+- enum selector row
+- toggle row
+- auto-linked slider row
+- profile manager bar
+- status banner
+- debug panel
+
+Avoid duplicating custom row logic independently inside each tab.
+
+---
+
+## 8. Required profile UX behavior
+
+Implement the profile bar at the bottom of the main window.
+
+Required actions:
+- save new profile
+- update current profile
+- delete current profile
+- select profile
+- load-at-start toggle for selected profile
+
+Behavior rules:
+- Update should be disabled when no profile is selected
+- Delete should require lightweight confirmation
+- Save New Profile should request a name
+- profile list should prefer profiles matching the selected device
+
+---
+
+## 9. Required status UX behavior
+
+Implement visible but low-noise status feedback for:
+- loading
+- reconnecting
+- profile applied
+- partial apply
+- control write failure
+- device disconnected
+
+Prefer:
+- inline banner
+- status line
+- row-level feedback where appropriate
+
+Do not make the interface feel like a stream of alerts.
+
+---
+
+## 10. Required empty/loading state behavior
+
+Implement these states clearly:
+
+### No device available
+- preview placeholder
+- disabled control area
+- informative message
+
+### Loading device
+- temporary loading state
+- avoid flashing unstable UI
+
+### Device disconnected
+- show disconnected state
+- keep structure visible
+- disable controls gracefully
+
+### Reconnecting
+- show non-blocking message
+- restore preview and control state when possible
+
+---
+
+## 11. Debug UI requirements
+
+Debug UI must exist, but be hidden by default.
+
+When enabled, it should display:
+- device IDs
+- control capabilities
+- readable/writable flags
+- value ranges
+- current values
+- recent write attempts
+- recent apply results
+- lifecycle event log
+
+Do not place debug information in the default everyday UI.
+
+---
+
+## 12. Implementation constraints
+
+The UX implementation must respect these technical boundaries:
+- no raw backend calls from views
+- no UI-state duplication across multiple layers without reason
+- no preview/control service merger
+- no hardcoded unsupported controls permanently visible by default
+- no unordered profile-apply UI flows
+
+---
+
+## 13. UI implementation sequence
+
+Build the UI in this order:
+
+### Stage A
+- shell window
+- top bar
+- preview area
+- tab container
+- bottom profile bar
+
+### Stage B
+- reusable control rows
+- grouped sections
+- status banner
+
+### Stage C
+- Basic tab UI
+
+### Stage D
+- Advanced tab UI
+
+### Stage E
+- Preferences tab UI
+
+### Stage F
+- profile save/update/delete flows
+
+### Stage G
+- empty/loading/reconnect states
+
+### Stage H
+- debug panel
+
+Do not jump straight into detailed control rows before the main layout exists.
+
+---
+
+## 14. UX validation checklist
+
+The coding agent should validate the interface against these questions:
+
+1. Is the device selector immediately visible?
+2. Is the preview always visually central?
+3. Are Basic and Advanced tabs clearly differentiated?
+4. Can the user understand why a disabled control is disabled?
+5. Can the user save and update a profile without hunting?
+6. Do reconnect and disconnect states preserve user orientation?
+7. Does the interface feel like a compact native utility rather than a prototype?
+
+---
+
+## 15. If uncertain
+
+If the coding agent is uncertain about a UX detail:
+1. prefer the structure and behavior defined in `docs/ux-spec.md`
+2. prefer native macOS utility conventions
+3. avoid adding visual complexity
+4. summarize the ambiguity and the chosen implementation in the progress update
+
+---
+
+## 16. Required output behavior from coding agent
+
+When implementing UI phases, the coding agent should summarize:
+- what UI structure was created
+- what reusable components were added
+- what behaviors were implemented
+- what remains
+- any UX tradeoffs or unresolved issues
+
+The agent should not silently improvise major layout changes.
