@@ -24,6 +24,9 @@ struct MainWindowView: View {
                     get: { viewModel.selectedProfile?.loadAtStart ?? false },
                     set: { viewModel.toggleLoadAtStart($0) }
                 ),
+                matchDescription: viewModel.selectedProfileMatchDescription,
+                canUpdate: viewModel.canUpdateSelectedProfile,
+                canLoad: viewModel.canLoadSelectedProfile,
                 onSaveNew: { viewModel.saveNewProfile() },
                 onUpdate: { viewModel.updateSelectedProfile() },
                 onLoad: { viewModel.loadSelectedProfile() },
@@ -38,6 +41,12 @@ struct MainWindowView: View {
             if viewModel.preferences.showDebugPanel {
                 DebugPanel(
                     selectedDevice: viewModel.selectedDevice,
+                    connectionState: viewModel.connectionState,
+                    previewSummary: viewModel.debugPreviewSummary,
+                    controlsSummary: viewModel.debugControlsSummary,
+                    backendSummary: viewModel.debugBackendSummary,
+                    rawMappingSummary: viewModel.debugRawMappingSummary,
+                    pipelineSummary: viewModel.debugPipelineSummary,
                     capabilities: viewModel.visibleCapabilities,
                     currentValues: viewModel.currentValues,
                     entries: viewModel.debugEntries
@@ -85,10 +94,11 @@ struct MainWindowView: View {
                 ConnectionBadge(state: viewModel.connectionState)
 
                 Button("Refresh") {
-                    viewModel.refreshSelection()
+                    viewModel.refreshAll()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(viewModel.isRefreshingSelection)
             }
         }
     }
@@ -100,6 +110,26 @@ struct MainWindowView: View {
 
             ZStack(alignment: .bottomLeading) {
                 PreviewSurfaceView(session: viewModel.previewSession)
+
+                if viewModel.previewSession == nil {
+                    VStack(spacing: 8) {
+                        Text(viewModel.previewPlaceholderTitle)
+                            .font(.headline)
+                        Text(viewModel.previewPlaceholderMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if viewModel.shouldOfferOpenCameraSettings {
+                            Button("Open Camera Settings") {
+                                viewModel.openCameraPrivacySettings()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+                    .multilineTextAlignment(.center)
+                    .padding(18)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(viewModel.selectedDevice?.name ?? "No camera selected")
@@ -152,6 +182,7 @@ struct MainWindowView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .disabled(viewModel.selectedDevice == nil && viewModel.selectedTab != .preferences)
         }
         .frame(maxWidth: .infinity)
     }

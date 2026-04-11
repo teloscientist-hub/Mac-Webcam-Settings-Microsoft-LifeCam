@@ -24,4 +24,8 @@ struct ProfileApplyResult: Sendable {
     var succeededCount: Int {
         items.filter { $0.status == .applied }.count
     }
+
+    var skippedCount: Int {
+        items.filter { $0.status == .skippedUnsupported }.count
+    }
 }

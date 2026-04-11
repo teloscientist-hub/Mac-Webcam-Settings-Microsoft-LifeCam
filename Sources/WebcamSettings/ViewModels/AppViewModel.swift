@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 
@@ -7,6 +8,7 @@ final class AppViewModel: ObservableObject {
         case loading
         case connected
         case disconnected
+        case deviceBusy
         case partialControlAccess
     }
 
@@ -34,6 +36,9 @@ final class AppViewModel: ObservableObject {
     @Published var inFlightControls: Set<CameraControlKey> = []
     @Published var controlErrorMessages: [CameraControlKey: String] = [:]
     @Published var showDeleteConfirmation = false
+    @Published var isRefreshingSelection = false
+    @Published private(set) var lastPreviewError: CameraControlError?
+    @Published private(set) var lastControlsError: CameraControlError?
 
     let basicTabViewModel: BasicTabViewModel
     let advancedTabViewModel: AdvancedTabViewModel
@@ -45,6 +50,7 @@ final class AppViewModel: ObservableObject {
     private var lifecycleEventsTask: Task<Void, Never>?
     private let writeCoordinator: ControlWriteCoordinator
     private var hasAttemptedStartupProfileLoad = false
+    private var lastConnectedDeviceIDs: Set<String> = []
 
     init(dependencies: AppDependencies) {
         self.dependencies = dependencies
@@ -77,6 +83,114 @@ final class AppViewModel: ObservableObject {
         capabilities.sorted { $0.displayName < $1.displayName }
     }
 
+    var debugBackendSummary: String {
+        RawUVCBindings.backendSummary(for: selectedDevice)
+    }
+
+    var debugPreviewSummary: String {
+        if previewSession != nil {
+            return "Active"
+        }
+        if let lastPreviewError {
+            return "Failed: \(lastPreviewError.localizedDescription)"
+        }
+        return "Inactive"
+    }
+
+    var debugControlsSummary: String {
+        if let lastControlsError {
+            return "Limited: \(lastControlsError.localizedDescription)"
+        }
+        return capabilities.isEmpty ? "No capabilities loaded" : "Loaded \(capabilities.count) capabilities"
+    }
+
+    var debugRawMappingSummary: String {
+        RawUVCBindings.mappingSummary(for: selectedDevice)
+    }
+
+    var debugPipelineSummary: String {
+        RawUVCBindings.pipelineSummary(for: selectedDevice)
+    }
+
+    var selectedProfileMatchDescription: String {
+        guard let selectedProfile, let selectedDevice else {
+            return "No profile selected"
+        }
+
+        let score = selectedDevice.matchScore(for: selectedProfile.deviceMatch)
+        switch score {
+        case 6...:
+            return "Exact device match"
+        case 3...5:
+            return "Likely device match"
+        case 1...2:
+            return "Partial device match"
+        default:
+            return "Different device"
+        }
+    }
+
+    var canUpdateSelectedProfile: Bool {
+        selectedProfile != nil && selectedDevice != nil
+    }
+
+    var canLoadSelectedProfile: Bool {
+        selectedProfile != nil && selectedDevice != nil
+    }
+
+    var shouldOfferOpenCameraSettings: Bool {
+        lastPreviewError == .permissionDenied
+    }
+
+    var previewPlaceholderTitle: String {
+        if lastPreviewError == .permissionDenied {
+            return "Camera permission needed"
+        }
+
+        if connectionState == .deviceBusy {
+            return "Camera busy"
+        }
+
+        switch connectionState {
+        case .loading:
+            return "Loading camera"
+        case .connected:
+            return "Preview unavailable"
+        case .disconnected:
+            return "No camera selected"
+        case .deviceBusy:
+            return "Camera busy"
+        case .partialControlAccess:
+            return previewSession == nil ? "Preview unavailable" : "Preview active, controls limited"
+        }
+    }
+
+    var previewPlaceholderMessage: String {
+        if lastPreviewError == .permissionDenied {
+            return "Grant camera access in System Settings, then refresh the selected camera."
+        }
+
+        if connectionState == .deviceBusy {
+            return "Another app or process may still be using the selected camera."
+        }
+
+        switch connectionState {
+        case .loading:
+            return "Fetching device details and preparing the preview."
+        case .connected:
+            return "The camera is selected, but a preview session is not available yet."
+        case .disconnected:
+            return "Connect a webcam or pick an available device to begin."
+        case .deviceBusy:
+            return "Another app or process may still be using the selected camera."
+        case .partialControlAccess:
+            if previewSession == nil {
+                return "Preview could not start, but device discovery and control services may still be available."
+            }
+            return "Some camera features are unavailable right now, but the preview is still active."
+        }
+    }
+
     var displayedProfiles: [CameraProfile] {
         profiles.sorted { lhs, rhs in
             let lhsScore = profileMatchScore(lhs)
@@ -89,6 +203,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func bootstrap() async {
+        dependencies.logger.info("App bootstrap started")
         await dependencies.lifecycleCoordinator.start()
         await dependencies.deviceDiscoveryService.startMonitoring()
         observeDeviceUpdates()
@@ -98,10 +213,14 @@ final class AppViewModel: ObservableObject {
         await refreshDevices()
         await refreshProfiles()
         await attemptStartupProfileLoadIfNeeded()
+        dependencies.logger.info("App bootstrap finished")
     }
 
     func refreshDevices() async {
-        availableDevices = await dependencies.deviceDiscoveryService.currentDevices()
+        let devices = await dependencies.deviceDiscoveryService.currentDevices()
+        availableDevices = devices
+        lastConnectedDeviceIDs = Set(devices.map(\.id))
+        dependencies.logger.info("Refresh devices loaded \(devices.count) entries")
         if selectedDeviceID == nil {
             selectedDeviceID = availableDevices.first?.id
         }
@@ -168,8 +287,16 @@ final class AppViewModel: ObservableObject {
     }
 
     func savePreferences() {
+        let previousPreferences = preferences
         let updated = preferencesViewModel.preferences
         preferences = updated
+
+        if previousPreferences.showUnsupportedControls != updated.showUnsupportedControls {
+            Task {
+                await loadSelection()
+            }
+        }
+
         Task {
             await dependencies.preferencesService.savePreferences(updated)
         }
@@ -244,6 +371,13 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func refreshAll() {
+        Task {
+            await refreshDevices()
+            await refreshProfiles()
+        }
+    }
+
     private func persistProfile(_ profile: CameraProfile, successMessage: String) {
         
         Task {
@@ -270,11 +404,18 @@ final class AppViewModel: ObservableObject {
         }
 
         Task {
+            let matchScore = selectedDevice.matchScore(for: selectedProfile.deviceMatch)
             let result = await dependencies.profileApplyingService.apply(profile: selectedProfile, to: selectedDevice)
             await MainActor.run {
-                self.statusMessage = result.items.contains(where: { $0.status == .failed })
-                    ? "Profile applied with issues"
-                    : "Applied \(result.succeededCount) control(s) from \(selectedProfile.name)"
+                if result.items.contains(where: { $0.status == .failed }) {
+                    self.statusMessage = "Profile applied with issues"
+                } else if result.skippedCount > 0 {
+                    self.statusMessage = "Applied \(result.succeededCount) control(s), skipped \(result.skippedCount)"
+                } else if matchScore == 0 {
+                    self.statusMessage = "Applied profile to a non-matching device"
+                } else {
+                    self.statusMessage = "Applied \(result.succeededCount) control(s) from \(selectedProfile.name)"
+                }
                 if let failure = result.items.first(where: { $0.status == .failed }) {
                     self.lastErrorMessage = failure.message
                 } else {
@@ -323,35 +464,76 @@ final class AppViewModel: ObservableObject {
             previewSession = nil
             statusMessage = "No camera detected."
             connectionState = .disconnected
+            lastPreviewError = nil
+            lastControlsError = nil
             syncTabViewModels()
+            dependencies.logger.info("No selected device available during loadSelection")
             return
         }
 
+        isRefreshingSelection = true
         connectionState = .loading
+        dependencies.logger.info("Loading selection for \(selectedDevice.name)")
+        lastPreviewError = nil
+        lastControlsError = nil
 
         do {
-            let preview = try await dependencies.previewService.startPreview(for: selectedDevice)
+            previewSession = try await dependencies.previewService.startPreview(for: selectedDevice)
+        } catch let error as CameraControlError {
+            previewSession = nil
+            lastPreviewError = error
+            dependencies.logger.error("Preview failed for \(selectedDevice.name): \(error.localizedDescription)")
+        } catch {
+            previewSession = nil
+            lastPreviewError = .backendFailure(error.localizedDescription)
+            dependencies.logger.error("Preview failed for \(selectedDevice.name): \(error.localizedDescription)")
+        }
+
+        do {
             async let fetchedCapabilities = dependencies.cameraControlService.fetchCapabilities(for: selectedDevice)
             async let fetchedValues = dependencies.cameraControlService.readCurrentValues(for: selectedDevice)
-
-            previewSession = preview
             let resolvedCapabilities = try await fetchedCapabilities
             capabilities = preferences.showUnsupportedControls
                 ? resolvedCapabilities
                 : resolvedCapabilities.filter(\.isSupported)
             currentValues = try await fetchedValues
-            syncTabViewModels()
-            preferencesViewModel.preferences = preferences
-            statusMessage = "Loaded \(selectedDevice.name)"
-            lastErrorMessage = nil
-            connectionState = .connected
-            await attemptStartupProfileLoadIfNeeded()
+        } catch let error as CameraControlError {
+            capabilities = []
+            currentValues = [:]
+            lastControlsError = error
+            dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
         } catch {
-            lastErrorMessage = error.localizedDescription
-            statusMessage = "Selection loaded with backend placeholders."
-            connectionState = .partialControlAccess
-            syncTabViewModels()
+            capabilities = []
+            currentValues = [:]
+            lastControlsError = .backendFailure(error.localizedDescription)
+            dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
         }
+
+        syncTabViewModels()
+        preferencesViewModel.preferences = preferences
+
+        let outcome = SelectionLoadStateResolver.resolve(
+            deviceName: selectedDevice.name,
+            previewError: lastPreviewError,
+            controlsError: lastControlsError
+        )
+        statusMessage = outcome.statusMessage
+        lastErrorMessage = outcome.lastErrorMessage
+        connectionState = outcome.connectionState
+
+        if outcome.connectionState == .connected {
+            dependencies.logger.info("Selection loaded for \(selectedDevice.name) with \(capabilities.count) capabilities")
+            await attemptStartupProfileLoadIfNeeded()
+        }
+
+        isRefreshingSelection = false
+    }
+
+    func openCameraPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     private func observeDeviceUpdates() {
@@ -381,7 +563,16 @@ final class AppViewModel: ObservableObject {
     }
 
     private func handleDeviceListUpdate(_ devices: [CameraDeviceDescriptor]) {
+        if devices == availableDevices {
+            return
+        }
+
+        let newDeviceIDs = Set(devices.map(\.id))
+        let reconnectedSelectedDevice = selectedDeviceID.map { newDeviceIDs.contains($0) && !lastConnectedDeviceIDs.contains($0) } ?? false
+        let lostSelectedDevice = selectedDeviceID.map { !newDeviceIDs.contains($0) && lastConnectedDeviceIDs.contains($0) } ?? false
+
         availableDevices = devices
+        lastConnectedDeviceIDs = newDeviceIDs
 
         if let selectedDeviceID, devices.contains(where: { $0.id == selectedDeviceID }) == false {
             self.selectedDeviceID = devices.first?.id
@@ -389,8 +580,17 @@ final class AppViewModel: ObservableObject {
             selectedDeviceID = devices.first?.id
         }
 
+        if lostSelectedDevice {
+            previewSession = nil
+            connectionState = .disconnected
+            statusMessage = "Selected camera disconnected"
+        }
+
         Task {
             await loadSelection()
+            if reconnectedSelectedDevice {
+                await handleReconnectRecovery()
+            }
         }
     }
 
@@ -418,6 +618,27 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func handleReconnectRecovery() async {
+        await MainActor.run {
+            self.statusMessage = "Camera reconnected, restoring state"
+        }
+
+        guard preferences.autoReapplyOnReconnect, let selectedProfile, let selectedDevice else { return }
+        let result = await dependencies.profileApplyingService.apply(profile: selectedProfile, to: selectedDevice)
+        await MainActor.run {
+            if result.items.contains(where: { $0.status == .failed }) {
+                self.lastErrorMessage = "Reconnect recovery reapplied with issues"
+                self.statusMessage = "Camera reconnected with partial recovery"
+            } else if result.skippedCount > 0 {
+                self.lastErrorMessage = nil
+                self.statusMessage = "Camera reconnected, unsupported controls skipped"
+            } else {
+                self.lastErrorMessage = nil
+                self.statusMessage = "Camera reconnected and profile restored"
+            }
+        }
+    }
+
     private func syncTabViewModels() {
         basicTabViewModel.update(capabilities: capabilities, currentValues: currentValues)
         advancedTabViewModel.update(capabilities: capabilities, currentValues: currentValues)
@@ -427,30 +648,32 @@ final class AppViewModel: ObservableObject {
         guard hasAttemptedStartupProfileLoad == false else { return }
         guard preferences.loadSelectedProfileAtStartup, let startupProfileID = preferences.startupProfileID else { return }
         guard let selectedDevice, let startupProfile = profiles.first(where: { $0.id == startupProfileID }) else { return }
+        guard selectedDevice.matchScore(for: startupProfile.deviceMatch) > 0 else {
+            await MainActor.run {
+                self.statusMessage = "Startup profile skipped because the selected device does not match"
+                self.lastErrorMessage = nil
+            }
+            hasAttemptedStartupProfileLoad = true
+            return
+        }
 
         hasAttemptedStartupProfileLoad = true
         let result = await dependencies.profileApplyingService.apply(profile: startupProfile, to: selectedDevice)
         await MainActor.run {
             self.selectedProfileID = startupProfile.id
             self.profileDraftName = startupProfile.name
-            self.statusMessage = result.items.contains(where: { $0.status == .failed })
-                ? "Startup profile applied with issues"
-                : "Startup profile loaded"
+            if result.items.contains(where: { $0.status == .failed }) {
+                self.statusMessage = "Startup profile applied with issues"
+            } else if result.skippedCount > 0 {
+                self.statusMessage = "Startup profile loaded with unsupported controls skipped"
+            } else {
+                self.statusMessage = "Startup profile loaded"
+            }
         }
     }
 
     private func profileMatchScore(_ profile: CameraProfile) -> Int {
         guard let selectedDevice else { return 0 }
-        var score = 0
-        if profile.deviceMatch.deviceIdentifier == selectedDevice.backendIdentifier || profile.deviceMatch.deviceIdentifier == selectedDevice.avFoundationUniqueID {
-            score += 4
-        }
-        if profile.deviceMatch.model == selectedDevice.model, profile.deviceMatch.model != nil {
-            score += 2
-        }
-        if profile.deviceMatch.deviceName == selectedDevice.name {
-            score += 1
-        }
-        return score
+        return selectedDevice.matchScore(for: profile.deviceMatch)
     }
 }

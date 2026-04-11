@@ -1,22 +1,23 @@
 import Foundation
 
 actor UVCControlAdapter {
+    private let backend: any UVCCameraBackend
     private let mapper = ControlCapabilityMapper()
 
-    func fetchCapabilities(for _: CameraDeviceDescriptor) async throws -> [CameraControlCapability] {
-        mapper.buildPlaceholderCapabilities()
+    init(backend: any UVCCameraBackend = InMemoryUVCCameraBackend()) {
+        self.backend = backend
     }
 
-    func readCurrentValues(for _: CameraDeviceDescriptor) async throws -> [CameraControlKey: CameraControlValue] {
-        Dictionary(uniqueKeysWithValues: mapper.buildPlaceholderCapabilities().compactMap { capability in
-            guard let currentValue = capability.currentValue else {
-                return nil
-            }
-            return (capability.key, currentValue)
-        })
+    func fetchCapabilities(for device: CameraDeviceDescriptor) async throws -> [CameraControlCapability] {
+        let backendCapabilities = try await backend.fetchCapabilities(for: device)
+        return mapper.mapBackendCapabilities(backendCapabilities)
     }
 
-    func writeValue(_: CameraControlValue, for _: CameraControlKey, device _: CameraDeviceDescriptor) async throws {
-        throw CameraControlError.backendFailure("Raw UVC backend is not wired yet.")
+    func readCurrentValues(for device: CameraDeviceDescriptor) async throws -> [CameraControlKey: CameraControlValue] {
+        try await backend.readCurrentValues(for: device)
+    }
+
+    func writeValue(_ value: CameraControlValue, for key: CameraControlKey, device: CameraDeviceDescriptor) async throws {
+        try await backend.writeValue(value, for: key, device: device)
     }
 }

@@ -2,6 +2,12 @@ import SwiftUI
 
 struct DebugPanel: View {
     let selectedDevice: CameraDeviceDescriptor?
+    let connectionState: AppViewModel.ConnectionState
+    let previewSummary: String
+    let controlsSummary: String
+    let backendSummary: String
+    let rawMappingSummary: String
+    let pipelineSummary: String
     let capabilities: [CameraControlCapability]
     let currentValues: [CameraControlKey: CameraControlValue]
     let entries: [DebugStore.Entry]
@@ -33,6 +39,22 @@ struct DebugPanel: View {
                 .foregroundStyle(.secondary)
             Text("Backend ID: \(selectedDevice?.backendIdentifier ?? "n/a")")
                 .foregroundStyle(.secondary)
+            Text("USB: \(selectedDevice?.usbIdentitySummary ?? "n/a")")
+                .foregroundStyle(.secondary)
+            Text("Serial: \(selectedDevice?.serialNumber ?? "n/a")")
+                .foregroundStyle(.secondary)
+            Text("Connection: \(connectionLabel)")
+                .foregroundStyle(.secondary)
+            Text("Preview: \(previewSummary)")
+                .foregroundStyle(.secondary)
+            Text("Controls: \(controlsSummary)")
+                .foregroundStyle(.secondary)
+            Text("Backend: \(backendSummary)")
+                .foregroundStyle(.secondary)
+            Text("Mappings: \(rawMappingSummary)")
+                .foregroundStyle(.secondary)
+            Text("Pipeline: \(pipelineSummary)")
+                .foregroundStyle(.secondary)
         }
         .font(.caption)
     }
@@ -43,9 +65,15 @@ struct DebugPanel: View {
                 .font(.subheadline.weight(.semibold))
             ForEach(capabilities.prefix(8)) { capability in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(capability.displayName) • supported=\(capability.isSupported ? "yes" : "no") • writable=\(capability.isWritable ? "yes" : "no")")
+                    Text("\(capability.displayName) • supported=\(capability.isSupported ? "yes" : "no") • readable=\(capability.isReadable ? "yes" : "no") • writable=\(capability.isWritable ? "yes" : "no")")
                     Text("Current: \(formattedValue(currentValues[capability.key] ?? capability.currentValue))")
                         .foregroundStyle(.secondary)
+                    Text("Range: \(formattedValue(capability.minValue)) ... \(formattedValue(capability.maxValue)) • step \(formattedValue(capability.stepValue))")
+                        .foregroundStyle(.secondary)
+                    if capability.enumOptions.isEmpty == false {
+                        Text("Options: \(capability.enumOptions.map(\.value).joined(separator: ", "))")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .font(.caption)
             }
@@ -85,6 +113,21 @@ struct DebugPanel: View {
             enumValue
         case nil:
             "n/a"
+        }
+    }
+
+    private var connectionLabel: String {
+        switch connectionState {
+        case .loading:
+            "Loading"
+        case .connected:
+            "Connected"
+        case .disconnected:
+            "Disconnected"
+        case .deviceBusy:
+            "Device Busy"
+        case .partialControlAccess:
+            "Partial Access"
         }
     }
 }

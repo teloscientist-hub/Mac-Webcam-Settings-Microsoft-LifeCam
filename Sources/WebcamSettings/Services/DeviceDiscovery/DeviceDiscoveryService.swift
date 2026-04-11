@@ -14,21 +14,29 @@ actor DeviceDiscoveryService: DeviceDiscoveryServicing {
 
     func currentDevices() async -> [CameraDeviceDescriptor] {
         let devices = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.external, .builtInWideAngleCamera, .continuityCamera],
+            deviceTypes: [.external, .builtInWideAngleCamera],
             mediaType: .video,
             position: .unspecified
         ).devices
 
         let mapped = devices.map {
-            CameraDeviceDescriptor(
+            let inferredManufacturer = inferredManufacturer(from: $0.localizedName)
+            let usbMetadata = USBDeviceRegistry.metadata(
+                matching: $0.localizedName,
+                manufacturerHint: inferredManufacturer
+            )
+            return CameraDeviceDescriptor(
                 id: $0.uniqueID,
                 name: $0.localizedName,
-                manufacturer: nil,
-                model: nil,
-                transportType: .unknown,
+                manufacturer: usbMetadata?.manufacturer ?? inferredManufacturer,
+                model: inferredModel(from: $0, usbMetadata: usbMetadata),
+                vendorID: usbMetadata?.vendorID,
+                productID: usbMetadata?.productID,
+                serialNumber: usbMetadata?.serialNumber,
+                transportType: transportType(for: $0),
                 isConnected: true,
                 avFoundationUniqueID: $0.uniqueID,
-                backendIdentifier: nil
+                backendIdentifier: $0.uniqueID
             )
         }
 
@@ -46,11 +54,6 @@ actor DeviceDiscoveryService: DeviceDiscoveryServicing {
                 Task {
                     await self.removeContinuation(id)
                 }
-            }
-
-            Task {
-                let devices = await self.currentDevices()
-                continuation.yield(devices)
             }
         }
     }
@@ -88,5 +91,38 @@ actor DeviceDiscoveryService: DeviceDiscoveryServicing {
 
     private func removeContinuation(_ id: UUID) {
         continuations.removeValue(forKey: id)
+    }
+
+    private func transportType(for device: AVCaptureDevice) -> CameraTransportType {
+        switch device.deviceType {
+        case .continuityCamera:
+            .continuity
+        case .builtInWideAngleCamera:
+            .builtIn
+        case .external:
+            .usb
+        default:
+            .unknown
+        }
+    }
+
+    private func inferredManufacturer(from name: String) -> String? {
+        if name.localizedCaseInsensitiveContains("Microsoft") || name.localizedCaseInsensitiveContains("LifeCam") {
+            return "Microsoft"
+        }
+        if name.localizedCaseInsensitiveContains("Logitech") {
+            return "Logitech"
+        }
+        return nil
+    }
+
+    private func inferredModel(from device: AVCaptureDevice, usbMetadata: USBDeviceRegistry.Metadata?) -> String? {
+        if let productName = usbMetadata?.productName, productName.isEmpty == false {
+            return productName
+        }
+        if device.localizedName.isEmpty == false {
+            return device.localizedName
+        }
+        return nil
     }
 }

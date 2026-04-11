@@ -1,16 +1,35 @@
 import Foundation
 
 struct ControlCapabilityMapper: Sendable {
-    func buildPlaceholderCapabilities() -> [CameraControlCapability] {
+    func mapBackendCapabilities(_ backendCapabilities: [BackendControlCapability]) -> [CameraControlCapability] {
+        backendCapabilities.map { capability in
+            CameraControlCapability(
+                key: capability.key,
+                displayName: capability.key.displayName,
+                type: capability.type,
+                isSupported: capability.isSupported,
+                isReadable: capability.isReadable,
+                isWritable: capability.isWritable,
+                minValue: capability.minValue,
+                maxValue: capability.maxValue,
+                stepValue: capability.stepValue,
+                defaultValue: capability.defaultValue,
+                currentValue: capability.currentValue,
+                enumOptions: capability.enumOptions,
+                dependency: dependency(for: capability.key)
+            )
+        }
+    }
+
+    func buildPlaceholderBackendCapabilities() -> [BackendControlCapability] {
         let sliderKeys: [CameraControlKey] = [
             .exposureTime, .brightness, .contrast, .saturation, .sharpness,
             .whiteBalanceTemperature, .backlightCompensation, .focus, .zoom, .pan, .tilt
         ]
 
         let sliderCapabilities = sliderKeys.map { key in
-            CameraControlCapability(
+            BackendControlCapability(
                 key: key,
-                displayName: key.displayName,
                 type: .integerRange,
                 isSupported: true,
                 isReadable: true,
@@ -20,15 +39,13 @@ struct ControlCapabilityMapper: Sendable {
                 stepValue: .int(1),
                 defaultValue: .int(50),
                 currentValue: .int(50),
-                enumOptions: [],
-                dependency: dependency(for: key)
+                enumOptions: []
             )
         }
 
-        let enumCapabilities: [CameraControlCapability] = [
-            CameraControlCapability(
+        let enumCapabilities: [BackendControlCapability] = [
+            BackendControlCapability(
                 key: .exposureMode,
-                displayName: CameraControlKey.exposureMode.displayName,
                 type: .enumSelection,
                 isSupported: true,
                 isReadable: true,
@@ -41,12 +58,10 @@ struct ControlCapabilityMapper: Sendable {
                 enumOptions: [
                     .init(id: "auto", title: "Auto", value: "auto"),
                     .init(id: "manual", title: "Manual", value: "manual")
-                ],
-                dependency: nil
+                ]
             ),
-            CameraControlCapability(
+            BackendControlCapability(
                 key: .powerLineFrequency,
-                displayName: CameraControlKey.powerLineFrequency.displayName,
                 type: .enumSelection,
                 isSupported: true,
                 isReadable: true,
@@ -61,12 +76,10 @@ struct ControlCapabilityMapper: Sendable {
                     .init(id: "50hz", title: "50 Hz", value: "50hz"),
                     .init(id: "60hz", title: "60 Hz", value: "60hz"),
                     .init(id: "auto", title: "Auto", value: "auto")
-                ],
-                dependency: nil
+                ]
             ),
-            CameraControlCapability(
+            BackendControlCapability(
                 key: .whiteBalanceAuto,
-                displayName: CameraControlKey.whiteBalanceAuto.displayName,
                 type: .boolean,
                 isSupported: true,
                 isReadable: true,
@@ -76,12 +89,10 @@ struct ControlCapabilityMapper: Sendable {
                 stepValue: nil,
                 defaultValue: .bool(true),
                 currentValue: .bool(true),
-                enumOptions: [],
-                dependency: nil
+                enumOptions: []
             ),
-            CameraControlCapability(
+            BackendControlCapability(
                 key: .focusAuto,
-                displayName: CameraControlKey.focusAuto.displayName,
                 type: .boolean,
                 isSupported: true,
                 isReadable: true,
@@ -91,8 +102,7 @@ struct ControlCapabilityMapper: Sendable {
                 stepValue: nil,
                 defaultValue: .bool(true),
                 currentValue: .bool(true),
-                enumOptions: [],
-                dependency: nil
+                enumOptions: []
             )
         ]
 

@@ -3,11 +3,12 @@ import Foundation
 actor CameraControlService: CameraControlServicing {
     private let logger: AppLogger
     private let debugStore: DebugStore
-    private let adapter = UVCControlAdapter()
+    private let adapter: UVCControlAdapter
 
-    init(logger: AppLogger, debugStore: DebugStore) {
+    init(logger: AppLogger, debugStore: DebugStore, adapter: UVCControlAdapter = UVCControlAdapter()) {
         self.logger = logger
         self.debugStore = debugStore
+        self.adapter = adapter
     }
 
     func fetchCapabilities(for device: CameraDeviceDescriptor) async throws -> [CameraControlCapability] {

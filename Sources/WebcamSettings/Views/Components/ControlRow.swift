@@ -111,10 +111,18 @@ struct ControlRow: View {
     }
 
     private var isEnabled: Bool {
-        !(capability.dependency?.isDisabled(using: currentValues) ?? false)
+        capability.isSupported &&
+            capability.isWritable &&
+            !(capability.dependency?.isDisabled(using: currentValues) ?? false)
     }
 
     private var helperText: String? {
+        if capability.isSupported == false {
+            return "Unsupported on the selected device."
+        }
+        if capability.isWritable == false {
+            return "This control is read-only for the selected device."
+        }
         guard let dependency = capability.dependency, !isEnabled else {
             return nil
         }

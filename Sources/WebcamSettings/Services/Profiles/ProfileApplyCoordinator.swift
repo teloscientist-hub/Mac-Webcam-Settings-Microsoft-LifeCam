@@ -22,9 +22,16 @@ actor ProfileApplyCoordinator: ProfileApplying {
     func apply(profile: CameraProfile, to device: CameraDeviceDescriptor) async -> ProfileApplyResult {
         let orderedValues = planBuilder.buildOrderedValues(from: profile.values)
         var results: [ProfileApplyResult.ItemResult] = []
+        let capabilities = (try? await controlService.fetchCapabilities(for: device)) ?? []
+        let capabilityMap = Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key, $0) })
 
         for (key, value) in orderedValues {
-            let result = await writeCoordinator.write(value, key: key, capability: nil, device: device)
+            guard let capability = capabilityMap[key], capability.isSupported, capability.isWritable else {
+                results.append(.init(key: key, status: .skippedUnsupported, message: "Skipped unsupported control"))
+                continue
+            }
+
+            let result = await writeCoordinator.write(value, key: key, capability: capability, device: device)
             switch result {
             case .success:
                 results.append(.init(key: key, status: .applied, message: "Applied"))
@@ -35,7 +42,6 @@ actor ProfileApplyCoordinator: ProfileApplying {
 
         logger.info("Applied profile \(profile.name) to \(device.name)")
         await debugStore.record(category: "profiles", message: "Applied profile \(profile.name) to \(device.name)")
-        _ = controlService
         return ProfileApplyResult(items: results)
     }
 }

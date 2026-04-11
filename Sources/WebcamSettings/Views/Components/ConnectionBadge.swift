@@ -17,6 +17,7 @@ struct ConnectionBadge: View {
         case .loading: "Loading"
         case .connected: "Connected"
         case .disconnected: "Disconnected"
+        case .deviceBusy: "Device Busy"
         case .partialControlAccess: "Partial Access"
         }
     }
@@ -26,6 +27,7 @@ struct ConnectionBadge: View {
         case .loading: .orange
         case .connected: .green
         case .disconnected: .secondary
+        case .deviceBusy: .red
         case .partialControlAccess: .yellow
         }
     }
