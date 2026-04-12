@@ -18,8 +18,27 @@ struct AppFactory {
         let preferencesService = PreferencesService(logger: logger, debugStore: debugStore)
         let deviceDiscoveryService = DeviceDiscoveryService(logger: logger, debugStore: debugStore)
         let previewService = CameraPreviewService(logger: logger, debugStore: debugStore)
+        #if canImport(IOKit)
+        let rawExecutor: any RawUVCControlTransferExecuting = IOKitRawUVCControlTransferExecutor()
+        #else
+        let rawExecutor: any RawUVCControlTransferExecuting = UnavailableRawUVCControlTransferExecutor()
+        #endif
+        let rawTransport = LoggingRawUVCTransport(
+            wrapped: PolicyRawUVCTransport(
+                wrapped: ValidatingRawUVCTransport(
+                    wrapped: UnavailableRawUVCTransport(executor: rawExecutor),
+                    logger: logger,
+                    debugStore: debugStore
+                ),
+                policy: .default,
+                logger: logger,
+                debugStore: debugStore
+            ),
+            logger: logger,
+            debugStore: debugStore
+        )
         let backend = FallbackUVCCameraBackend(
-            preferred: SyntheticRawUVCCameraBackend(),
+            preferred: SyntheticRawUVCCameraBackend(transport: rawTransport),
             fallback: InMemoryUVCCameraBackend(),
             logger: logger,
             debugStore: debugStore

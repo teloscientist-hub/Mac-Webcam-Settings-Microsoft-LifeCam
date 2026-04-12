@@ -104,12 +104,26 @@ final class AppViewModel: ObservableObject {
         return capabilities.isEmpty ? "No capabilities loaded" : "Loaded \(capabilities.count) capabilities"
     }
 
+    var debugCapabilitySourceSummary: String {
+        guard capabilities.isEmpty == false else {
+            return "No capability provenance available"
+        }
+
+        let rawCount = capabilities.filter { $0.source == .rawCatalog }.count
+        let fallbackCount = capabilities.filter { $0.source == .simulatedFallback }.count
+        return "\(rawCount) raw-catalog, \(fallbackCount) simulated-fallback"
+    }
+
     var debugRawMappingSummary: String {
         RawUVCBindings.mappingSummary(for: selectedDevice)
     }
 
     var debugPipelineSummary: String {
         RawUVCBindings.pipelineSummary(for: selectedDevice)
+    }
+
+    var debugRawTargetSummary: String {
+        RawUVCDeviceLocatorSupport.resolvedTargetSummary(for: selectedDevice)
     }
 
     var selectedProfileMatchDescription: String {

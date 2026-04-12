@@ -11,6 +11,8 @@ struct USBDeviceRegistry {
         let vendorID: Int?
         let productID: Int?
         let serialNumber: String?
+        let registryEntryID: UInt64?
+        let serviceClassName: String?
     }
 
     static func metadata(matching localizedName: String, manufacturerHint: String?) -> Metadata? {
@@ -66,7 +68,9 @@ struct USBDeviceRegistry {
                     productName: copyStringProperty("USB Product Name", service: service) ?? copyStringProperty("product", service: service),
                     vendorID: copyIntProperty("idVendor", service: service),
                     productID: copyIntProperty("idProduct", service: service),
-                    serialNumber: copyStringProperty("USB Serial Number", service: service) ?? copyStringProperty("kUSBSerialNumberString", service: service)
+                    serialNumber: copyStringProperty("USB Serial Number", service: service) ?? copyStringProperty("kUSBSerialNumberString", service: service),
+                    registryEntryID: copyRegistryEntryID(service),
+                    serviceClassName: className
                 )
             )
         }
@@ -92,6 +96,15 @@ struct USBDeviceRegistry {
             return nil
         }
         return number.intValue
+    }
+
+    private static func copyRegistryEntryID(_ service: io_service_t) -> UInt64? {
+        var entryID: UInt64 = 0
+        let result = IORegistryEntryGetRegistryEntryID(service, &entryID)
+        guard result == KERN_SUCCESS else {
+            return nil
+        }
+        return entryID
     }
 
     private static func namesMatch(lhs: String?, rhs: String?) -> Bool {

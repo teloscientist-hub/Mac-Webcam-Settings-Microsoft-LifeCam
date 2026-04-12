@@ -45,8 +45,10 @@ struct MainWindowView: View {
                     previewSummary: viewModel.debugPreviewSummary,
                     controlsSummary: viewModel.debugControlsSummary,
                     backendSummary: viewModel.debugBackendSummary,
+                    capabilitySourceSummary: viewModel.debugCapabilitySourceSummary,
                     rawMappingSummary: viewModel.debugRawMappingSummary,
                     pipelineSummary: viewModel.debugPipelineSummary,
+                    rawTargetSummary: viewModel.debugRawTargetSummary,
                     capabilities: viewModel.visibleCapabilities,
                     currentValues: viewModel.currentValues,
                     entries: viewModel.debugEntries

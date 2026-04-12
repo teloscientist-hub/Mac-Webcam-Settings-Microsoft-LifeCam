@@ -7,9 +7,9 @@ func syntheticRawBackendReturnsMappedCapabilitiesForLifeCamCandidate() async thr
 
     let capabilities = try await backend.fetchCapabilities(for: makeSyntheticRawDevice())
 
-    #expect(capabilities.contains(where: { $0.key == .brightness && $0.isSupported }))
-    #expect(capabilities.contains(where: { $0.key == .pan && $0.isSupported }))
-    #expect(capabilities.contains(where: { $0.key == .tilt && $0.isSupported }))
+    #expect(capabilities.contains(where: { $0.key == .brightness && $0.isSupported && $0.source == .rawCatalog }))
+    #expect(capabilities.contains(where: { $0.key == .pan && $0.isSupported && $0.source == .rawCatalog }))
+    #expect(capabilities.contains(where: { $0.key == .tilt && $0.isSupported && $0.source == .rawCatalog }))
 }
 
 @Test

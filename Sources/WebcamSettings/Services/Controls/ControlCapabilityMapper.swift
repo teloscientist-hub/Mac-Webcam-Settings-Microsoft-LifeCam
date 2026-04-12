@@ -7,6 +7,7 @@ struct ControlCapabilityMapper: Sendable {
                 key: capability.key,
                 displayName: capability.key.displayName,
                 type: capability.type,
+                source: capability.source,
                 isSupported: capability.isSupported,
                 isReadable: capability.isReadable,
                 isWritable: capability.isWritable,
@@ -31,6 +32,7 @@ struct ControlCapabilityMapper: Sendable {
             BackendControlCapability(
                 key: key,
                 type: .integerRange,
+                source: .simulatedFallback,
                 isSupported: true,
                 isReadable: true,
                 isWritable: true,
@@ -47,6 +49,7 @@ struct ControlCapabilityMapper: Sendable {
             BackendControlCapability(
                 key: .exposureMode,
                 type: .enumSelection,
+                source: .simulatedFallback,
                 isSupported: true,
                 isReadable: true,
                 isWritable: true,
@@ -63,6 +66,7 @@ struct ControlCapabilityMapper: Sendable {
             BackendControlCapability(
                 key: .powerLineFrequency,
                 type: .enumSelection,
+                source: .simulatedFallback,
                 isSupported: true,
                 isReadable: true,
                 isWritable: true,
@@ -81,6 +85,7 @@ struct ControlCapabilityMapper: Sendable {
             BackendControlCapability(
                 key: .whiteBalanceAuto,
                 type: .boolean,
+                source: .simulatedFallback,
                 isSupported: true,
                 isReadable: true,
                 isWritable: true,
@@ -94,6 +99,7 @@ struct ControlCapabilityMapper: Sendable {
             BackendControlCapability(
                 key: .focusAuto,
                 type: .boolean,
+                source: .simulatedFallback,
                 isSupported: true,
                 isReadable: true,
                 isWritable: true,

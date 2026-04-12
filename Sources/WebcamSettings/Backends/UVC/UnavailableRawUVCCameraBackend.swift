@@ -13,9 +13,9 @@ actor UnavailableRawUVCCameraBackend: UVCCameraBackend {
 
     func writeValue(_ value: CameraControlValue, for key: CameraControlKey, device: CameraDeviceDescriptor) async throws {
         _ = value
-        if let descriptor = RawUVCBindings.descriptor(for: key, device: device) {
+        if let plan = RawUVCBindings.requestPlan(for: key, device: device, operation: .setCurrent) {
             throw CameraControlError.backendFailure(
-                "Direct UVC write not implemented for \(key.displayName) (entity \(descriptor.entity.rawValue), selector 0x\(String(format: "%02X", descriptor.selector)), unit \(descriptor.unitID))."
+                "Direct UVC write not implemented for \(key.displayName) (entity \(plan.entity.rawValue), selector 0x\(String(format: "%02X", plan.selector)), unit \(plan.unitID), len \(plan.expectedLength))."
             )
         }
 

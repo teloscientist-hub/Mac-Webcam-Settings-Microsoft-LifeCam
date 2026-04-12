@@ -6,8 +6,10 @@ struct DebugPanel: View {
     let previewSummary: String
     let controlsSummary: String
     let backendSummary: String
+    let capabilitySourceSummary: String
     let rawMappingSummary: String
     let pipelineSummary: String
+    let rawTargetSummary: String
     let capabilities: [CameraControlCapability]
     let currentValues: [CameraControlKey: CameraControlValue]
     let entries: [DebugStore.Entry]
@@ -51,9 +53,13 @@ struct DebugPanel: View {
                 .foregroundStyle(.secondary)
             Text("Backend: \(backendSummary)")
                 .foregroundStyle(.secondary)
+            Text("Sources: \(capabilitySourceSummary)")
+                .foregroundStyle(.secondary)
             Text("Mappings: \(rawMappingSummary)")
                 .foregroundStyle(.secondary)
             Text("Pipeline: \(pipelineSummary)")
+                .foregroundStyle(.secondary)
+            Text("Raw Target: \(rawTargetSummary)")
                 .foregroundStyle(.secondary)
         }
         .font(.caption)
@@ -65,7 +71,7 @@ struct DebugPanel: View {
                 .font(.subheadline.weight(.semibold))
             ForEach(capabilities.prefix(8)) { capability in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(capability.displayName) • supported=\(capability.isSupported ? "yes" : "no") • readable=\(capability.isReadable ? "yes" : "no") • writable=\(capability.isWritable ? "yes" : "no")")
+                    Text("\(capability.displayName) • source=\(capability.source.rawValue) • supported=\(capability.isSupported ? "yes" : "no") • readable=\(capability.isReadable ? "yes" : "no") • writable=\(capability.isWritable ? "yes" : "no")")
                     Text("Current: \(formattedValue(currentValues[capability.key] ?? capability.currentValue))")
                         .foregroundStyle(.secondary)
                     Text("Range: \(formattedValue(capability.minValue)) ... \(formattedValue(capability.maxValue)) • step \(formattedValue(capability.stepValue))")

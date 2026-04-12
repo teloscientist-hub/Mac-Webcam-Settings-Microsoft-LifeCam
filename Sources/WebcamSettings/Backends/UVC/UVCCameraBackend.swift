@@ -3,6 +3,7 @@ import Foundation
 struct BackendControlCapability: Sendable {
     let key: CameraControlKey
     let type: CameraControlType
+    let source: ControlCapabilitySource
     let isSupported: Bool
     let isReadable: Bool
     let isWritable: Bool
@@ -12,6 +13,34 @@ struct BackendControlCapability: Sendable {
     let defaultValue: CameraControlValue?
     let currentValue: CameraControlValue?
     let enumOptions: [CameraControlOption]
+
+    init(
+        key: CameraControlKey,
+        type: CameraControlType,
+        source: ControlCapabilitySource = .simulatedFallback,
+        isSupported: Bool,
+        isReadable: Bool,
+        isWritable: Bool,
+        minValue: CameraControlValue?,
+        maxValue: CameraControlValue?,
+        stepValue: CameraControlValue?,
+        defaultValue: CameraControlValue?,
+        currentValue: CameraControlValue?,
+        enumOptions: [CameraControlOption]
+    ) {
+        self.key = key
+        self.type = type
+        self.source = source
+        self.isSupported = isSupported
+        self.isReadable = isReadable
+        self.isWritable = isWritable
+        self.minValue = minValue
+        self.maxValue = maxValue
+        self.stepValue = stepValue
+        self.defaultValue = defaultValue
+        self.currentValue = currentValue
+        self.enumOptions = enumOptions
+    }
 }
 
 struct BackendDeviceProfile: Sendable {
@@ -48,6 +77,7 @@ enum BackendCapabilityCatalog {
             return BackendControlCapability(
                 key: capability.key,
                 type: capability.type,
+                source: capability.source,
                 isSupported: isSupported,
                 isReadable: isSupported,
                 isWritable: isSupported,
@@ -90,6 +120,7 @@ actor InMemoryUVCCameraBackend: UVCCameraBackend {
             BackendControlCapability(
                 key: capability.key,
                 type: capability.type,
+                source: capability.source,
                 isSupported: capability.isSupported,
                 isReadable: capability.isReadable,
                 isWritable: capability.isWritable,
