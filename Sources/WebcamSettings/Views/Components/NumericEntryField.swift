@@ -4,6 +4,7 @@ import SwiftUI
 struct NumericEntryField: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    let focusRequestID: Int
     let isEnabled: Bool
     let onCommit: () -> Void
     let onIncrement: () -> Void
@@ -43,18 +44,22 @@ struct NumericEntryField: NSViewRepresentable {
         nsView.onDecrement = {
             context.coordinator.parent.onDecrement()
         }
-        if isFocused, nsView.window?.firstResponder !== nsView.currentEditor() {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
-            }
+        if focusRequestID != context.coordinator.lastAppliedFocusRequestID {
+            context.coordinator.lastAppliedFocusRequestID = focusRequestID
+            context.coordinator.requestFocus(for: nsView)
+        } else if isFocused, nsView.window?.firstResponder !== nsView.currentEditor() {
+            context.coordinator.requestFocus(for: nsView)
         }
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: NumericEntryField
+        var lastAppliedFocusRequestID: Int
 
         init(parent: NumericEntryField) {
             self.parent = parent
+            self.lastAppliedFocusRequestID = parent.focusRequestID
         }
 
         func controlTextDidChange(_ notification: Notification) {
@@ -88,6 +93,25 @@ struct NumericEntryField: NSViewRepresentable {
         @MainActor
         @objc func commit() {
             parent.onCommit()
+        }
+
+        func requestFocus(for textField: NumericTextField, attemptsRemaining: Int = 4) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+                guard textField.isEnabled else { return }
+                guard let window = textField.window else {
+                    if attemptsRemaining > 0 {
+                        self.requestFocus(for: textField, attemptsRemaining: attemptsRemaining - 1)
+                    }
+                    return
+                }
+
+                window.makeFirstResponder(nil)
+                if window.makeFirstResponder(textField) {
+                    textField.selectText(nil)
+                } else if attemptsRemaining > 0 {
+                    self.requestFocus(for: textField, attemptsRemaining: attemptsRemaining - 1)
+                }
+            }
         }
     }
 }

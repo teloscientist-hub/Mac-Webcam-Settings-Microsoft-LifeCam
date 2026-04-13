@@ -14,6 +14,7 @@ struct SliderControlRow: View {
     @State private var usesNumericInput = false
     @State private var draftValue = ""
     @State private var numericFieldIsFocused = false
+    @State private var numericFocusRequestID = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -26,6 +27,7 @@ struct SliderControlRow: View {
                     NumericEntryField(
                         text: $draftValue,
                         isFocused: $numericFieldIsFocused,
+                        focusRequestID: numericFocusRequestID,
                         isEnabled: isEnabled,
                         onCommit: {
                             commitDraftValue()
@@ -53,6 +55,12 @@ struct SliderControlRow: View {
                 Button {
                     usesNumericInput.toggle()
                     draftValue = formattedValue
+                    if usesNumericInput {
+                        numericFocusRequestID += 1
+                        numericFieldIsFocused = true
+                    } else {
+                        numericFieldIsFocused = false
+                    }
                 } label: {
                     Text("#")
                         .font(.caption.weight(.semibold))
@@ -94,9 +102,6 @@ struct SliderControlRow: View {
         }
         .onChange(of: value) { _, _ in
             draftValue = formattedValue
-        }
-        .onChange(of: usesNumericInput) { _, newValue in
-            numericFieldIsFocused = newValue
         }
     }
 
