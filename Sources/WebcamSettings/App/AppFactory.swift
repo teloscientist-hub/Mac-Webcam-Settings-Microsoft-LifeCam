@@ -16,6 +16,7 @@ struct AppFactory {
     @MainActor
     func makeDependencies() -> AppDependencies {
         let preferencesService = PreferencesService(logger: logger, debugStore: debugStore)
+        let launchAtLoginService = LaunchAtLoginService(logger: logger, debugStore: debugStore)
         let deviceDiscoveryService = DeviceDiscoveryService(logger: logger, debugStore: debugStore)
         let previewService = CameraPreviewService(logger: logger, debugStore: debugStore)
         #if canImport(IOKit)
@@ -65,6 +66,7 @@ struct AppFactory {
             profileService: profileService,
             profileApplyingService: profileApplyCoordinator,
             preferencesService: preferencesService,
+            launchAtLoginService: launchAtLoginService,
             lifecycleCoordinator: lifecycleCoordinator
         )
     }

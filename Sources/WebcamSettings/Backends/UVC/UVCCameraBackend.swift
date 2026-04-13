@@ -52,12 +52,37 @@ struct BackendDeviceProfile: Sendable {
     let overrides: [CameraControlKey: CapabilityOverride]
 
     struct CapabilityOverride: Sendable {
+        let isReadable: Bool?
+        let isWritable: Bool?
+        let availabilityNote: String?
         let minValue: CameraControlValue?
         let maxValue: CameraControlValue?
         let stepValue: CameraControlValue?
         let defaultValue: CameraControlValue?
         let currentValue: CameraControlValue?
         let enumOptions: [CameraControlOption]?
+
+        init(
+            isReadable: Bool? = nil,
+            isWritable: Bool? = nil,
+            availabilityNote: String? = nil,
+            minValue: CameraControlValue?,
+            maxValue: CameraControlValue?,
+            stepValue: CameraControlValue?,
+            defaultValue: CameraControlValue?,
+            currentValue: CameraControlValue?,
+            enumOptions: [CameraControlOption]?
+        ) {
+            self.isReadable = isReadable
+            self.isWritable = isWritable
+            self.availabilityNote = availabilityNote
+            self.minValue = minValue
+            self.maxValue = maxValue
+            self.stepValue = stepValue
+            self.defaultValue = defaultValue
+            self.currentValue = currentValue
+            self.enumOptions = enumOptions
+        }
     }
 }
 
@@ -77,30 +102,28 @@ enum BackendCapabilityCatalog {
         return baseCapabilities.map { capability in
             let isSupported = supported.contains(capability.key)
             let override = profile.overrides[capability.key]
+            let isReadable = override?.isReadable ?? isSupported
+            let isWritable = override?.isWritable ?? isSupported
             return BackendControlCapability(
                 key: capability.key,
                 type: capability.type,
                 source: capability.source,
                 isSupported: isSupported,
-                isReadable: isSupported,
-                isWritable: isSupported,
-                availabilityNote: nil,
+                isReadable: isReadable,
+                isWritable: isWritable,
+                availabilityNote: override?.availabilityNote ?? capability.availabilityNote,
                 minValue: override?.minValue ?? capability.minValue,
                 maxValue: override?.maxValue ?? capability.maxValue,
                 stepValue: override?.stepValue ?? capability.stepValue,
-                defaultValue: override?.defaultValue ?? capability.defaultValue,
-                currentValue: isSupported ? (override?.currentValue ?? capability.currentValue) : nil,
+                defaultValue: isReadable || isWritable ? (override?.defaultValue ?? capability.defaultValue) : nil,
+                currentValue: isReadable || isWritable ? (override?.currentValue ?? capability.currentValue) : nil,
                 enumOptions: override?.enumOptions ?? capability.enumOptions
             )
         }
     }
 
     static func backendProfile(for device: CameraDeviceDescriptor) -> BackendDeviceProfile {
-        if device.vendorID == 0x045E, device.productID == 0x0772 {
-            return .lifeCamStudio
-        }
-
-        if device.name.localizedCaseInsensitiveContains("LifeCam") || device.model?.localizedCaseInsensitiveContains("LifeCam") == true {
+        if device.isMicrosoftLifeCamStudio {
             return .lifeCamStudio
         }
         return .genericUSB
@@ -203,6 +226,8 @@ actor InMemoryUVCCameraBackend: UVCCameraBackend {
 }
 
 private extension BackendDeviceProfile {
+    static let genericUSBAvailabilityNote = "Generic UVC mapping. Confirm this control on the attached webcam before relying on it."
+
     static let lifeCamStudio = BackendDeviceProfile(
         name: "Microsoft LifeCam Studio",
         supportedKeys: [
@@ -213,7 +238,15 @@ private extension BackendDeviceProfile {
             .focusAuto, .focus, .zoom
         ],
         overrides: [
-            .exposureTime: .init(minValue: .int(1), maxValue: .int(10_000), stepValue: .int(1), defaultValue: .int(156), currentValue: .int(156), enumOptions: nil),
+            .exposureTime: .init(
+                availabilityNote: "This camera exposes manual exposure in coarse whole-number steps. Values around 1-10 can go black, and the next step can jump bright.",
+                minValue: .int(1),
+                maxValue: .int(10_000),
+                stepValue: .int(1),
+                defaultValue: .int(156),
+                currentValue: .int(156),
+                enumOptions: nil
+            ),
             .brightness: .init(minValue: .int(30), maxValue: .int(255), stepValue: .int(1), defaultValue: .int(133), currentValue: .int(133), enumOptions: nil),
             .contrast: .init(minValue: .int(0), maxValue: .int(10), stepValue: .int(1), defaultValue: .int(5), currentValue: .int(1), enumOptions: nil),
             .saturation: .init(minValue: .int(0), maxValue: .int(200), stepValue: .int(1), defaultValue: .int(103), currentValue: .int(95), enumOptions: nil),
@@ -221,12 +254,30 @@ private extension BackendDeviceProfile {
             .whiteBalanceTemperature: .init(minValue: .int(2500), maxValue: .int(10_000), stepValue: .int(1), defaultValue: .int(4500), currentValue: .int(3700), enumOptions: nil),
             .backlightCompensation: .init(minValue: .int(0), maxValue: .int(10), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(4), enumOptions: nil),
             .focus: .init(minValue: .int(0), maxValue: .int(40), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(16), enumOptions: nil),
-            .zoom: .init(minValue: .int(0), maxValue: .int(317), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(0), enumOptions: nil),
-            .powerLineFrequency: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .enumCase("60hz"), currentValue: .enumCase("60hz"), enumOptions: [
-                .init(id: "disabled", title: "Disabled", value: "disabled"),
-                .init(id: "50hz", title: "50 Hz", value: "50hz"),
-                .init(id: "60hz", title: "60 Hz", value: "60hz")
-            ]),
+            .zoom: .init(
+                isReadable: true,
+                isWritable: false,
+                availabilityNote: "On Tahoe, this LifeCam acknowledges zoom numerically but does not apply a visible optical change. Zoom is disabled to avoid false state.",
+                minValue: .int(0),
+                maxValue: .int(317),
+                stepValue: .int(1),
+                defaultValue: .int(0),
+                currentValue: .int(0),
+                enumOptions: nil
+            ),
+            .powerLineFrequency: .init(
+                availabilityNote: "This control is exposed by the camera, but this LifeCam does not reliably persist frequency changes on Tahoe.",
+                minValue: nil,
+                maxValue: nil,
+                stepValue: nil,
+                defaultValue: .enumCase("60hz"),
+                currentValue: .enumCase("60hz"),
+                enumOptions: [
+                    .init(id: "disabled", title: "Disabled", value: "disabled"),
+                    .init(id: "50hz", title: "50 Hz", value: "50hz"),
+                    .init(id: "60hz", title: "60 Hz", value: "60hz")
+                ]
+            ),
             .whiteBalanceAuto: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .bool(true), currentValue: .bool(true), enumOptions: nil),
             .focusAuto: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .bool(true), currentValue: .bool(false), enumOptions: nil),
             .exposureMode: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .enumCase("auto"), currentValue: .enumCase("manual"), enumOptions: [
@@ -244,10 +295,105 @@ private extension BackendDeviceProfile {
             .powerLineFrequency, .focusAuto, .focus
         ],
         overrides: [
-            .exposureTime: .init(minValue: .int(1), maxValue: .int(100), stepValue: .int(1), defaultValue: .int(40), currentValue: .int(40), enumOptions: nil),
-            .brightness: .init(minValue: .int(0), maxValue: .int(100), stepValue: .int(1), defaultValue: .int(50), currentValue: .int(50), enumOptions: nil),
-            .whiteBalanceTemperature: .init(minValue: .int(2800), maxValue: .int(6500), stepValue: .int(100), defaultValue: .int(4200), currentValue: .int(4200), enumOptions: nil),
-            .focus: .init(minValue: .int(0), maxValue: .int(30), stepValue: .int(1), defaultValue: .int(10), currentValue: .int(10), enumOptions: nil)
+            .exposureMode: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: nil,
+                maxValue: nil,
+                stepValue: nil,
+                defaultValue: .enumCase("auto"),
+                currentValue: .enumCase("auto"),
+                enumOptions: nil
+            ),
+            .exposureTime: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(1),
+                maxValue: .int(100),
+                stepValue: .int(1),
+                defaultValue: .int(40),
+                currentValue: .int(40),
+                enumOptions: nil
+            ),
+            .brightness: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(0),
+                maxValue: .int(100),
+                stepValue: .int(1),
+                defaultValue: .int(50),
+                currentValue: .int(50),
+                enumOptions: nil
+            ),
+            .contrast: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(0),
+                maxValue: .int(100),
+                stepValue: .int(1),
+                defaultValue: .int(50),
+                currentValue: .int(50),
+                enumOptions: nil
+            ),
+            .saturation: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(0),
+                maxValue: .int(100),
+                stepValue: .int(1),
+                defaultValue: .int(50),
+                currentValue: .int(50),
+                enumOptions: nil
+            ),
+            .sharpness: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(0),
+                maxValue: .int(100),
+                stepValue: .int(1),
+                defaultValue: .int(50),
+                currentValue: .int(50),
+                enumOptions: nil
+            ),
+            .whiteBalanceAuto: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: nil,
+                maxValue: nil,
+                stepValue: nil,
+                defaultValue: .bool(true),
+                currentValue: .bool(true),
+                enumOptions: nil
+            ),
+            .whiteBalanceTemperature: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(2800),
+                maxValue: .int(6500),
+                stepValue: .int(100),
+                defaultValue: .int(4200),
+                currentValue: .int(4200),
+                enumOptions: nil
+            ),
+            .powerLineFrequency: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: nil,
+                maxValue: nil,
+                stepValue: nil,
+                defaultValue: .enumCase("auto"),
+                currentValue: .enumCase("auto"),
+                enumOptions: nil
+            ),
+            .focusAuto: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: nil,
+                maxValue: nil,
+                stepValue: nil,
+                defaultValue: .bool(true),
+                currentValue: .bool(true),
+                enumOptions: nil
+            ),
+            .focus: .init(
+                availabilityNote: genericUSBAvailabilityNote,
+                minValue: .int(0),
+                maxValue: .int(30),
+                stepValue: .int(1),
+                defaultValue: .int(10),
+                currentValue: .int(10),
+                enumOptions: nil
+            )
         ]
     )
 }

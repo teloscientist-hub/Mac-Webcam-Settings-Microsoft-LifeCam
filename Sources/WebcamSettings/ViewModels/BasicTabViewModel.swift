@@ -6,8 +6,8 @@ final class BasicTabViewModel: ObservableObject {
     @Published private(set) var currentValues: [CameraControlKey: CameraControlValue] = [:]
 
     private let keys: Set<CameraControlKey> = [
-        .exposureMode, .exposureTime, .brightness, .contrast,
-        .saturation, .sharpness, .whiteBalanceAuto, .whiteBalanceTemperature
+        .brightness, .contrast, .saturation, .sharpness,
+        .focusAuto, .focus
     ]
 
     func update(capabilities: [CameraControlCapability], currentValues: [CameraControlKey: CameraControlValue]) {

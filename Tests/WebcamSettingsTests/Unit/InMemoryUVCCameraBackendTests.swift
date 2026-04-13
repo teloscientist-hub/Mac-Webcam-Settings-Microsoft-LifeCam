@@ -33,24 +33,24 @@ func backendAllowsManualFocusAfterDisablingAutofocus() async throws {
 @Test
 func backendMarksAdvancedControlsUnsupportedForGenericDevices() async throws {
     let backend = InMemoryUVCCameraBackend()
-    let genericDevice = CameraDeviceDescriptor(
-        id: "generic-1",
-        name: "Generic USB Camera",
-        manufacturer: nil,
-        model: nil,
-        vendorID: nil,
-        productID: nil,
-        serialNumber: nil,
-        transportType: .usb,
-        isConnected: true,
-        avFoundationUniqueID: "generic-avf",
-        backendIdentifier: "generic-backend"
-    )
+    let genericDevice = makeGenericBackendDevice()
 
     let capabilities = try await backend.fetchCapabilities(for: genericDevice)
     let panCapability = capabilities.first(where: { $0.key == .pan })
 
     #expect(panCapability?.isSupported == false)
+}
+
+@Test
+func genericUSBProfileMarksWritableControlsAsExperimental() async throws {
+    let backend = InMemoryUVCCameraBackend()
+    let capabilities = try await backend.fetchCapabilities(for: makeGenericBackendDevice())
+
+    let brightness = capabilities.first(where: { $0.key == .brightness })
+    let focusAuto = capabilities.first(where: { $0.key == .focusAuto })
+
+    #expect(brightness?.availabilityNote == "Generic UVC mapping. Confirm this control on the attached webcam before relying on it.")
+    #expect(focusAuto?.availabilityNote == "Generic UVC mapping. Confirm this control on the attached webcam before relying on it.")
 }
 
 @Test
@@ -105,5 +105,21 @@ private func makeBackendDevice() -> CameraDeviceDescriptor {
         isConnected: true,
         avFoundationUniqueID: "lifecam-avf",
         backendIdentifier: "lifecam-backend"
+    )
+}
+
+private func makeGenericBackendDevice() -> CameraDeviceDescriptor {
+    CameraDeviceDescriptor(
+        id: "generic-1",
+        name: "Generic USB Camera",
+        manufacturer: nil,
+        model: nil,
+        vendorID: nil,
+        productID: nil,
+        serialNumber: nil,
+        transportType: .usb,
+        isConnected: true,
+        avFoundationUniqueID: "generic-avf",
+        backendIdentifier: "generic-backend"
     )
 }

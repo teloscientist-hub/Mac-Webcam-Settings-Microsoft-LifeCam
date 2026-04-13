@@ -7,6 +7,10 @@ struct MainWindowView: View {
         VStack(spacing: 14) {
             header
 
+            if let compatibilityNotice = viewModel.compatibilityNotice {
+                compatibilityBanner(compatibilityNotice)
+            }
+
             HStack(alignment: .top, spacing: 16) {
                 previewColumn
                 controlsColumn
@@ -50,6 +54,7 @@ struct MainWindowView: View {
                     pipelineSummary: viewModel.debugPipelineSummary,
                     rawTargetSummary: viewModel.debugRawTargetSummary,
                     ownershipSummary: viewModel.debugOwnershipSummary,
+                    compatibilitySummary: viewModel.debugCompatibilitySummary,
                     capabilities: viewModel.visibleCapabilities,
                     currentValues: viewModel.currentValues,
                     entries: viewModel.debugEntries
@@ -91,7 +96,7 @@ struct MainWindowView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Webcam Settings")
                 .font(.title.bold())
-            Text("Capability-driven LifeCam Studio replacement")
+            Text("Capability-driven control and preview for UVC webcams")
                 .foregroundStyle(.secondary)
         }
     }
@@ -166,7 +171,8 @@ struct MainWindowView: View {
                 switch viewModel.selectedTab {
                 case .basic:
                     BasicTabView(
-                        viewModel: viewModel.basicTabViewModel,
+                        capabilities: viewModel.visibleCapabilities,
+                        currentValues: viewModel.currentValues,
                         inFlightControls: viewModel.inFlightControls,
                         controlErrorMessages: viewModel.controlErrorMessages
                     ) { key, value in
@@ -174,7 +180,8 @@ struct MainWindowView: View {
                     }
                 case .advanced:
                     AdvancedTabView(
-                        viewModel: viewModel.advancedTabViewModel,
+                        capabilities: viewModel.visibleCapabilities,
+                        currentValues: viewModel.currentValues,
                         inFlightControls: viewModel.inFlightControls,
                         controlErrorMessages: viewModel.controlErrorMessages
                     ) { key, value in
@@ -190,5 +197,19 @@ struct MainWindowView: View {
             .disabled(viewModel.selectedDevice == nil && viewModel.selectedTab != .preferences)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func compatibilityBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "wrench.and.screwdriver")
+                .foregroundStyle(.secondary)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.24), in: RoundedRectangle(cornerRadius: 12))
     }
 }

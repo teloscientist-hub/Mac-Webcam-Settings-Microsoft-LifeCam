@@ -92,14 +92,12 @@ struct DefaultRawUVCDeviceInterfaceOpener: RawUVCDeviceInterfaceOpening {
         }
 
         let deviceIsOpen = openResult == kIOReturnSuccess
+
+        var configurationCount: UInt8 = 0
         if deviceIsOpen {
             defer {
                 _ = device.pointee.USBDeviceClose(deviceInterface)
             }
-        }
-
-        var configurationCount: UInt8 = 0
-        if deviceIsOpen {
             let configResult = device.pointee.GetNumberOfConfigurations(deviceInterface, &configurationCount)
             guard configResult == kIOReturnSuccess else {
                 throw CameraControlError.backendFailure(

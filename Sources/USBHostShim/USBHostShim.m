@@ -187,6 +187,84 @@ static WSUSBHostRequestResult WSUSBPerformDeviceRequestTOOnService(
     return result;
 }
 
+static WSUSBHostRequestResult WSUSBProbeStyleRequestTOForVIDPID(
+    uint32_t vendorID,
+    uint32_t productID,
+    bool seize,
+    uint8_t requestType,
+    uint8_t request,
+    uint16_t value,
+    uint16_t index,
+    void *buffer,
+    uint16_t length,
+    uint32_t noDataTimeout,
+    uint32_t completionTimeout
+) {
+    const char *classNames[] = { "IOUSBDevice", "IOUSBHostDevice" };
+    WSUSBHostRequestResult lastResult = { .status = (int32_t)kIOReturnNoDevice, .bytesTransferred = 0 };
+
+    for (size_t classIndex = 0; classIndex < 2; classIndex++) {
+        CFMutableDictionaryRef dictionary = IOServiceMatching(classNames[classIndex]);
+        if (!dictionary) {
+            continue;
+        }
+
+        io_iterator_t iterator = IO_OBJECT_NULL;
+        kern_return_t matchingResult = IOServiceGetMatchingServices(kIOMainPortDefault, dictionary, &iterator);
+        if (matchingResult != KERN_SUCCESS) {
+            lastResult.status = (int32_t)matchingResult;
+            continue;
+        }
+
+        io_service_t service = IO_OBJECT_NULL;
+        while ((service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+            CFTypeRef vendorRef = IORegistryEntryCreateCFProperty(service, CFSTR("idVendor"), kCFAllocatorDefault, 0);
+            CFTypeRef productRef = IORegistryEntryCreateCFProperty(service, CFSTR("idProduct"), kCFAllocatorDefault, 0);
+
+            uint32_t serviceVendorID = 0;
+            uint32_t serviceProductID = 0;
+            if (vendorRef) {
+                CFNumberGetValue((CFNumberRef)vendorRef, kCFNumberSInt32Type, &serviceVendorID);
+                CFRelease(vendorRef);
+            }
+            if (productRef) {
+                CFNumberGetValue((CFNumberRef)productRef, kCFNumberSInt32Type, &serviceProductID);
+                CFRelease(productRef);
+            }
+
+            if (serviceVendorID == vendorID && serviceProductID == productID) {
+                WSUSBHostRequestResult result = WSUSBPerformDeviceRequestTOOnService(
+                    service,
+                    seize,
+                    requestType,
+                    request,
+                    value,
+                    index,
+                    buffer,
+                    length,
+                    noDataTimeout,
+                    completionTimeout
+                );
+                IOObjectRelease(service);
+
+                if (result.status == (int32_t)kIOReturnSuccess) {
+                    IOObjectRelease(iterator);
+                    return result;
+                }
+
+                lastResult = result;
+                continue;
+            }
+
+            IOObjectRelease(service);
+        }
+
+        IOObjectRelease(iterator);
+    }
+
+    return lastResult;
+}
+
 WSUSBHostRequestResult WSUSBDeviceInterfaceSendRequestTO(
     uint64_t registryEntryID,
     bool seize,
@@ -238,13 +316,9 @@ WSUSBHostRequestResult WSUSBLegacyDeviceRequestTOForVIDPID(
     uint32_t noDataTimeout,
     uint32_t completionTimeout
 ) {
-    io_service_t service = WSUSBFindLegacyUSBDeviceService(vendorID, productID);
-    if (service == IO_OBJECT_NULL) {
-        return (WSUSBHostRequestResult){ .status = (int32_t)kIOReturnNoDevice, .bytesTransferred = 0 };
-    }
-
-    WSUSBHostRequestResult result = WSUSBPerformDeviceRequestTOOnService(
-        service,
+    return WSUSBProbeStyleRequestTOForVIDPID(
+        vendorID,
+        productID,
         seize,
         requestType,
         request,
@@ -255,6 +329,32 @@ WSUSBHostRequestResult WSUSBLegacyDeviceRequestTOForVIDPID(
         noDataTimeout,
         completionTimeout
     );
-    IOObjectRelease(service);
-    return result;
+}
+
+WSUSBHostRequestResult WSUSBProbeStyleDeviceRequestTOForVIDPID(
+    uint32_t vendorID,
+    uint32_t productID,
+    bool seize,
+    uint8_t requestType,
+    uint8_t request,
+    uint16_t value,
+    uint16_t index,
+    void *buffer,
+    uint16_t length,
+    uint32_t noDataTimeout,
+    uint32_t completionTimeout
+) {
+    return WSUSBProbeStyleRequestTOForVIDPID(
+        vendorID,
+        productID,
+        seize,
+        requestType,
+        request,
+        value,
+        index,
+        buffer,
+        length,
+        noDataTimeout,
+        completionTimeout
+    );
 }

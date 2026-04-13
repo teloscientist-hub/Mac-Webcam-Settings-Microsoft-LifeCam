@@ -10,22 +10,31 @@ struct ToggleControlRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle(
-                title,
-                isOn: Binding(
-                    get: { isOn },
-                    set: { newValue in onChange(newValue) }
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.subheadline)
+                    .frame(width: 145, alignment: .leading)
+                Spacer(minLength: 0)
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { isOn },
+                        set: { newValue in onChange(newValue) }
+                    )
                 )
-            )
-            .disabled(!isEnabled)
+                .labelsHidden()
+                .disabled(!isEnabled)
+            }
 
             if let helperText {
                 Text(helperText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.leading, 155)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 }

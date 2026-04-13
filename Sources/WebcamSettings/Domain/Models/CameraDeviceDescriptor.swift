@@ -93,6 +93,15 @@ struct CameraDeviceDescriptor: Identifiable, Codable, Hashable, Sendable {
         }
         return controlInterfaceOwner.localizedCaseInsensitiveContains("uvcassistant")
     }
+
+    var isMicrosoftLifeCamStudio: Bool {
+        let hasMicrosoftVendor = vendorID == 0x045E
+        let knownLifeCamStudioPID = productID == 0x0772 || productID == 0x0811
+        let looksLikeLifeCam = name.localizedCaseInsensitiveContains("LifeCam Studio")
+            || model?.localizedCaseInsensitiveContains("LifeCam Studio") == true
+
+        return hasMicrosoftVendor && (knownLifeCamStudioPID || looksLikeLifeCam)
+    }
 }
 
 enum CameraTransportType: String, Codable, CaseIterable, Sendable {

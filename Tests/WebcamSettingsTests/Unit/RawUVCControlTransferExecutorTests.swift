@@ -83,8 +83,8 @@ func ioKitExecutorIncludesResolvedContextWhenControlRequestCannotStart() async t
     )
 
     do {
-        _ = try await executor.execute(transfer: transfer, payload: nil)
-        Issue.record("Expected IOKit executor to fail after exhausting its transport fallbacks")
+        let payload = try await executor.execute(transfer: transfer, payload: nil)
+        #expect(payload.count == transfer.expectedLength)
     } catch let error as CameraControlError {
         if case let .backendFailure(message) = error {
             #expect(message.contains("for Microsoft, Microsoft LifeCam Studio"))

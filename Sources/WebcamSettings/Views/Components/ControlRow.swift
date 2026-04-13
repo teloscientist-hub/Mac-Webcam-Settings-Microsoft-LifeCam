@@ -33,6 +33,8 @@ struct ControlRow: View {
                 title: capability.displayName,
                 value: numericValue,
                 range: numericRange,
+                step: numericStep,
+                prefersIntegerInput: capability.type == .integerRange,
                 isEnabled: isEnabled && !isWriting,
                 helperText: statusText,
                 onChange: { value in
@@ -106,6 +108,17 @@ struct ControlRow: View {
         return minValue ... maxValue
     }
 
+    private var numericStep: Double {
+        switch capability.stepValue {
+        case let .int(value):
+            return Double(value)
+        case let .double(value):
+            return value
+        default:
+            return capability.type == .integerRange ? 1 : 0.1
+        }
+    }
+
     private var currentValue: CameraControlValue? {
         currentValues[capability.key]
     }
@@ -123,10 +136,10 @@ struct ControlRow: View {
         if capability.isWritable == false {
             return capability.availabilityNote ?? "This control is read-only for the selected device."
         }
-        guard let dependency = capability.dependency, !isEnabled else {
-            return nil
+        if let dependency = capability.dependency, !isEnabled {
+            return dependency.reason
         }
-        return dependency.reason
+        return capability.availabilityNote
     }
 
     private var statusText: String? {

@@ -6,6 +6,7 @@ struct PreferencesTabView: View {
 
     var body: some View {
         Form {
+            Toggle("Launch app at login", isOn: binding(\.launchAtLogin))
             Toggle("Load selected profile at startup", isOn: binding(\.loadSelectedProfileAtStartup))
             Toggle("Auto-reapply on reconnect", isOn: binding(\.autoReapplyOnReconnect))
             Toggle("Auto-reapply after wake", isOn: binding(\.autoReapplyAfterWake))

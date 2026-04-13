@@ -99,9 +99,9 @@ func rawBindingsTreatUSBDeviceAsRawCandidateEvenBeforeImplementation() {
     let device = makeRawLifeCam()
 
     #expect(RawUVCBindings.canAttemptDirectAccess(for: device) == true)
-    #expect(RawUVCBindings.backendSummary(for: device).contains("Raw UVC candidate"))
+    #expect(RawUVCBindings.backendSummary(for: device).contains("Validated raw UVC device"))
     #expect(RawUVCBindings.mappingSummary(for: device).contains("mapped controls"))
-    #expect(RawUVCBindings.pipelineSummary(for: device).contains("IOUSBHost-based raw transport"))
+    #expect(RawUVCBindings.pipelineSummary(for: device).contains("validated raw USB request path"))
 }
 
 private func makeRawLifeCam() -> CameraDeviceDescriptor {

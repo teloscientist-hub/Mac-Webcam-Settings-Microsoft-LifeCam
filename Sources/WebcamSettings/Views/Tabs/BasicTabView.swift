@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct BasicTabView: View {
-    @ObservedObject var viewModel: BasicTabViewModel
+    let capabilities: [CameraControlCapability]
+    let currentValues: [CameraControlKey: CameraControlValue]
     let inFlightControls: Set<CameraControlKey>
     let controlErrorMessages: [CameraControlKey: String]
     let onWrite: (CameraControlKey, CameraControlValue) -> Void
@@ -9,16 +10,12 @@ struct BasicTabView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                ControlSection(title: "Exposure") {
-                    sectionRows(for: [.exposureMode, .exposureTime])
+                ControlSection(title: "Focus") {
+                    sectionRows(for: [.focusAuto, .focus])
                 }
 
                 ControlSection(title: "Image") {
                     sectionRows(for: [.brightness, .contrast, .saturation, .sharpness])
-                }
-
-                ControlSection(title: "White Balance") {
-                    sectionRows(for: [.whiteBalanceAuto, .whiteBalanceTemperature])
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -28,10 +25,10 @@ struct BasicTabView: View {
     @ViewBuilder
     private func sectionRows(for keys: [CameraControlKey]) -> some View {
         ForEach(keys, id: \.self) { key in
-            if let capability = viewModel.capabilities.first(where: { $0.key == key }) {
+            if let capability = capabilities.first(where: { $0.key == key }) {
                 ControlRow(
                     capability: capability,
-                    currentValues: viewModel.currentValues,
+                    currentValues: currentValues,
                     isWriting: inFlightControls.contains(capability.key),
                     errorMessage: controlErrorMessages[capability.key],
                     onWrite: onWrite

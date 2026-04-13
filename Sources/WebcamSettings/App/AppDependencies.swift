@@ -9,5 +9,6 @@ struct AppDependencies {
     let profileService: any ProfileServicing
     let profileApplyingService: any ProfileApplying
     let preferencesService: any PreferencesServicing
+    let launchAtLoginService: any LaunchAtLoginServicing
     let lifecycleCoordinator: LifecycleCoordinator
 }

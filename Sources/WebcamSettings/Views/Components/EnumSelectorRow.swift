@@ -11,9 +11,11 @@ struct EnumSelectorRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 10) {
                 Text(title)
-                Spacer()
+                    .font(.subheadline)
+                    .frame(width: 145, alignment: .leading)
+                Spacer(minLength: 0)
                 Picker(
                     title,
                     selection: Binding(
@@ -26,7 +28,7 @@ struct EnumSelectorRow: View {
                     }
                 }
                 .labelsHidden()
-                .frame(width: 180)
+                .frame(width: 160)
                 .disabled(!isEnabled)
             }
 
@@ -34,9 +36,11 @@ struct EnumSelectorRow: View {
                 Text(helperText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.leading, 155)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 }

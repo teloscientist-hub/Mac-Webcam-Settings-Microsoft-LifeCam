@@ -5,12 +5,12 @@ struct ControlSection<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
             content
         }
-        .padding(14)
+        .padding(10)
         .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
     }
 }

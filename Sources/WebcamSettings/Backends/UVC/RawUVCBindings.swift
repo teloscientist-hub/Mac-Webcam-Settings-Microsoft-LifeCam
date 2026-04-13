@@ -58,11 +58,7 @@ enum RawUVCBindings {
     }
 
     static func mappedControls(for device: CameraDeviceDescriptor) -> [ControlDescriptor] {
-        if device.vendorID == 0x045E, device.productID == 0x0772 {
-            return lifeCamStudioDescriptors
-        }
-
-        if device.name.localizedCaseInsensitiveContains("LifeCam") || device.model?.localizedCaseInsensitiveContains("LifeCam") == true {
+        if device.isMicrosoftLifeCamStudio {
             return lifeCamStudioDescriptors
         }
 
@@ -226,7 +222,10 @@ enum RawUVCBindings {
         }
 
         if canAttemptDirectAccess(for: device) {
-            return "Capabilities come from the raw mapping catalog, and live device requests now route through IOUSBHost-based raw transport."
+            if device.isMicrosoftLifeCamStudio {
+                return "Capabilities come from the raw mapping catalog, and live device requests use the validated raw USB request path for this webcam."
+            }
+            return "Capabilities come from the raw mapping catalog, and live device requests use the generic raw USB control stack."
         }
 
         if device.transportType == .usb {
@@ -244,7 +243,10 @@ enum RawUVCBindings {
         let mappedControlCount = mappedControls(for: device).count
         if canAttemptDirectAccess(for: device) {
             let status = isImplemented ? "ready" : "planned"
-            return "Raw UVC candidate (\(mappedControlCount) mapped controls, \(status))"
+            if device.isMicrosoftLifeCamStudio {
+                return "Validated raw UVC device (\(mappedControlCount) mapped controls, \(status))"
+            }
+            return "Generic raw UVC candidate (\(mappedControlCount) mapped controls, \(status))"
         }
 
         if device.transportType == .usb {

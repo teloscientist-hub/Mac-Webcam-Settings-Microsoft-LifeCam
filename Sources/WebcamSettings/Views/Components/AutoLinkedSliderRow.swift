@@ -23,6 +23,8 @@ struct AutoLinkedSliderRow: View {
                 title: sliderTitle,
                 value: sliderValue,
                 range: range,
+                step: 1,
+                prefersIntegerInput: true,
                 isEnabled: !isAutomatic,
                 helperText: nil,
                 onChange: onSlide

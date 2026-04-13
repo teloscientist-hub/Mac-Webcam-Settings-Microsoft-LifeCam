@@ -4,15 +4,26 @@ import Foundation
 import IOKit
 import IOKit.usb.IOUSBLib
 
-private let targetVendorID: Int = 0x045E
-private let targetProductID: Int = 0x0772
 private let brightnessSelector: UInt8 = 0x02
 private let processingUnitID: UInt8 = 0x04
 private let noDataTimeout: UInt32 = 500
 private let completionTimeout: UInt32 = 1000
 
+struct USBProbeTarget {
+    let vendorID: Int
+    let productID: Int
+
+    static let lifeCamStudio = USBProbeTarget(vendorID: 0x045E, productID: 0x0772)
+
+    var summary: String {
+        "VID:PID \(String(format: "%04X:%04X", vendorID, productID))"
+    }
+}
+
 struct ProbeOptions {
+    let target: USBProbeTarget
     let setBrightness: Int?
+    let setZoom: Int?
     let probeUserClient: Bool
     let probeControlUserClient: Bool
     let probeControlMethods: Bool
@@ -28,11 +39,32 @@ struct ProbeOptions {
         let probeControlScalars = arguments.contains("--probe-control-scalars")
         let probeProblemControls = arguments.contains("--probe-problem-controls")
         let probeExtendedControls = arguments.contains("--probe-extended-controls")
+        let target = USBProbeTarget(
+            vendorID: parseHexArgument("--vendor-id", arguments: arguments) ?? USBProbeTarget.lifeCamStudio.vendorID,
+            productID: parseHexArgument("--product-id", arguments: arguments) ?? USBProbeTarget.lifeCamStudio.productID
+        )
+        if let flagIndex = arguments.firstIndex(of: "--set-zoom"),
+           arguments.indices.contains(flagIndex + 1),
+           let value = Int(arguments[flagIndex + 1]) {
+            return ProbeOptions(
+                target: target,
+                setBrightness: nil,
+                setZoom: value,
+                probeUserClient: probeUserClient,
+                probeControlUserClient: probeControlUserClient,
+                probeControlMethods: probeControlMethods,
+                probeControlScalars: probeControlScalars,
+                probeProblemControls: probeProblemControls,
+                probeExtendedControls: probeExtendedControls
+            )
+        }
         if let flagIndex = arguments.firstIndex(of: "--set-brightness"),
            arguments.indices.contains(flagIndex + 1),
            let value = Int(arguments[flagIndex + 1]) {
             return ProbeOptions(
+                target: target,
                 setBrightness: value,
+                setZoom: nil,
                 probeUserClient: probeUserClient,
                 probeControlUserClient: probeControlUserClient,
                 probeControlMethods: probeControlMethods,
@@ -42,7 +74,9 @@ struct ProbeOptions {
             )
         }
         return ProbeOptions(
+            target: target,
             setBrightness: nil,
+            setZoom: nil,
             probeUserClient: probeUserClient,
             probeControlUserClient: probeControlUserClient,
             probeControlMethods: probeControlMethods,
@@ -50,6 +84,17 @@ struct ProbeOptions {
             probeProblemControls: probeProblemControls,
             probeExtendedControls: probeExtendedControls
         )
+    }
+
+    private static func parseHexArgument(_ flag: String, arguments: [String]) -> Int? {
+        guard let flagIndex = arguments.firstIndex(of: flag),
+              arguments.indices.contains(flagIndex + 1) else {
+            return nil
+        }
+
+        let rawValue = arguments[flagIndex + 1]
+            .replacingOccurrences(of: "0x", with: "", options: [.caseInsensitive])
+        return Int(rawValue, radix: 16)
     }
 }
 
@@ -78,10 +123,14 @@ enum ProbeError: Error, CustomStringConvertible {
     }
 }
 
+@MainActor
 @main
 struct WebcamSettingsRawProbe {
+    private static var activeTarget = USBProbeTarget.lifeCamStudio
+
     static func main() throws {
         let options = ProbeOptions.parse()
+        activeTarget = options.target
         let matches = try findTargetDevices()
         if options.probeUserClient {
             try runUserClientProbe(matches: matches)
@@ -105,6 +154,10 @@ struct WebcamSettingsRawProbe {
         }
         if options.probeExtendedControls {
             try runExtendedControlProbe(matches: matches)
+            return
+        }
+        if let setZoom = options.setZoom {
+            try setZoomValue(setZoom, matches: matches)
             return
         }
         let (match, deviceInterface) = try openFirstAvailableDeviceInterface(matches: matches)
@@ -141,9 +194,12 @@ struct WebcamSettingsRawProbe {
             print("Brightness after set: \(updated)")
         } else {
             print("No write attempted. Pass --set-brightness <value> to test a write.")
+            print("Pass --set-zoom <value> to set zoom directly without restoring the original value.")
+            print("Current target: \(activeTarget.summary)")
+            print("Pass --vendor-id <hex> and --product-id <hex> to target a different USB webcam.")
             print("Pass --probe-user-client to test IOServiceAuthorize/IOServiceOpen on the matched USB services.")
-            print("Pass --probe-control-user-client to test IOServiceAuthorize/IOServiceOpen on LifeCam control interfaces.")
-            print("Pass --probe-control-methods to sweep a few IOConnect external-method selectors on the LifeCam control interface.")
+            print("Pass --probe-control-user-client to test IOServiceAuthorize/IOServiceOpen on matched UVC control interfaces.")
+            print("Pass --probe-control-methods to sweep a few IOConnect external-method selectors on the matched UVC control interface.")
             print("Pass --probe-control-scalars to sweep small scalar inputs against the live control-interface selectors.")
             print("Pass --probe-problem-controls to exercise power-line, white-balance-auto, and focus-auto/manual directly.")
             print("Pass --probe-extended-controls to exercise exposure, zoom, and pan/tilt directly.")
@@ -278,7 +334,7 @@ struct WebcamSettingsRawProbe {
     }
 
     private static func runUserClientProbe(matches: [USBMatch]) throws {
-        print("Probing IOService authorization and user-client open for matching LifeCam services...")
+        print("Probing IOService authorization and user-client open for matching USB services (\(activeTarget.summary))...")
 
         for match in matches {
             guard let matching = IORegistryEntryIDMatching(match.registryEntryID) else {
@@ -308,8 +364,8 @@ struct WebcamSettingsRawProbe {
     }
 
     private static func runControlInterfaceUserClientProbe() throws {
-        let interfaces = try findLifeCamControlInterfaces()
-        print("Probing IOService authorization and user-client open for \(interfaces.count) LifeCam control interface(s)...")
+        let interfaces = try findControlInterfaces()
+        print("Probing IOService authorization and user-client open for \(interfaces.count) matched control interface(s) (\(activeTarget.summary))...")
 
         for interface in interfaces {
             guard let matching = IORegistryEntryIDMatching(interface.registryEntryID) else {
@@ -342,9 +398,9 @@ struct WebcamSettingsRawProbe {
     }
 
     private static func runControlInterfaceMethodProbe() throws {
-        let interfaces = try findLifeCamControlInterfaces()
+        let interfaces = try findControlInterfaces()
         guard let interface = interfaces.first else {
-            throw ProbeError.message("No LifeCam control interface was available for method probing.")
+            throw ProbeError.message("No matching UVC control interface was available for method probing.")
         }
 
         print("Probing IOConnect external-method selectors on control interface if=\(interface.interfaceNumber) registry=0x\(hex(interface.registryEntryID, width: 16)) owner=\(interface.owner ?? "n/a")")
@@ -384,9 +440,9 @@ struct WebcamSettingsRawProbe {
     }
 
     private static func runControlInterfaceScalarProbe() throws {
-        let interfaces = try findLifeCamControlInterfaces()
+        let interfaces = try findControlInterfaces()
         guard let interface = interfaces.first else {
-            throw ProbeError.message("No LifeCam control interface was available for scalar probing.")
+            throw ProbeError.message("No matching UVC control interface was available for scalar probing.")
         }
 
         let targets: [(type: UInt32, selector: UInt32)] = [
@@ -440,7 +496,7 @@ struct WebcamSettingsRawProbe {
                 let vendorID = copyIntProperty("idVendor", service: service)
                 let productID = copyIntProperty("idProduct", service: service)
 
-                guard vendorID == targetVendorID, productID == targetProductID else {
+                guard vendorID == activeTarget.vendorID, productID == activeTarget.productID else {
                     continue
                 }
 
@@ -461,7 +517,7 @@ struct WebcamSettingsRawProbe {
         }
 
         guard matches.isEmpty == false else {
-            throw ProbeError.message("Could not find Microsoft LifeCam Studio (VID:PID 045E:0772).")
+            throw ProbeError.message("Could not find a USB webcam matching \(activeTarget.summary).")
         }
 
         return matches
@@ -481,7 +537,7 @@ struct WebcamSettingsRawProbe {
             }
         }
 
-        throw ProbeError.message("Failed to open any matching LifeCam USB service: \(failures.joined(separator: "; "))")
+        throw ProbeError.message("Failed to open any matching USB service for \(activeTarget.summary): \(failures.joined(separator: "; "))")
     }
 
     private static func openDeviceInterface(registryEntryID: UInt64) throws -> (pointer: UnsafeMutablePointer<UnsafeMutablePointer<IOUSBDeviceInterface942>?>, interface: UnsafeMutablePointer<IOUSBDeviceInterface942>) {
@@ -626,7 +682,7 @@ struct WebcamSettingsRawProbe {
         )
     }
 
-    private static func findLifeCamControlInterfaces() throws -> [UVCControlInterface] {
+    private static func findControlInterfaces() throws -> [UVCControlInterface] {
         guard let dictionary = IOServiceMatching("IOUSBHostInterface") else {
             throw ProbeError.message("Failed to build IOUSBHostInterface matching dictionary.")
         }
@@ -642,8 +698,8 @@ struct WebcamSettingsRawProbe {
         while case let service = IOIteratorNext(iterator), service != 0 {
             defer { IOObjectRelease(service) }
 
-            guard copyIntProperty("idVendor", service: service) == targetVendorID,
-                  copyIntProperty("idProduct", service: service) == targetProductID,
+            guard copyIntProperty("idVendor", service: service) == activeTarget.vendorID,
+                  copyIntProperty("idProduct", service: service) == activeTarget.productID,
                   copyIntProperty("bInterfaceClass", service: service) == 0x0E,
                   copyIntProperty("bInterfaceSubClass", service: service) == 0x01 else {
                 continue
@@ -668,7 +724,7 @@ struct WebcamSettingsRawProbe {
         }
 
         guard interfaces.isEmpty == false else {
-            throw ProbeError.message("Could not find a LifeCam UVC control interface via IOUSBHostInterface.")
+            throw ProbeError.message("Could not find a matching UVC control interface via IOUSBHostInterface for \(activeTarget.summary).")
         }
 
         return interfaces.sorted {
@@ -716,6 +772,35 @@ struct WebcamSettingsRawProbe {
             request: 0x01,
             deviceInterface: deviceInterface
         )
+    }
+
+    private static func setZoomValue(_ zoom: Int, matches: [USBMatch]) throws {
+        let (_, deviceInterface) = try openFirstAvailableDeviceInterface(matches: matches)
+        defer { _ = deviceInterface.interface.pointee.Release(deviceInterface.pointer) }
+
+        let openResult = deviceInterface.interface.pointee.USBDeviceOpenSeize(deviceInterface.pointer)
+        guard openResult == kIOReturnSuccess else {
+            throw ProbeError.message("USBDeviceOpenSeize failed: 0x\(hex(openResult, width: 8))")
+        }
+        defer { _ = deviceInterface.interface.pointee.USBDeviceClose(deviceInterface.pointer) }
+
+        let controlInterface = try findControlInterface(deviceInterface: deviceInterface.pointer)
+        let clamped = max(Int(Int16.min), min(Int(Int16.max), zoom))
+        let signed = Int16(clamped)
+        try writeInt16Control(
+            signed,
+            selector: 0x0B,
+            unitID: 0x01,
+            interfaceNumber: controlInterface.interfaceNumber,
+            deviceInterface: deviceInterface.pointer
+        )
+        let updated = try readInt16Control(
+            selector: 0x0B,
+            unitID: 0x01,
+            interfaceNumber: controlInterface.interfaceNumber,
+            deviceInterface: deviceInterface.pointer
+        )
+        print("Zoom set \(signed) -> \(updated)")
     }
 
     private static func probeEnumControl(

@@ -142,7 +142,7 @@ func writeCoordinatorReturnsRefreshedValuesOnSuccess() async throws {
 
     switch result {
     case let .success(writeResult):
-        #expect(writeResult.refreshedValues?[.brightness] == .int(42))
+        #expect(writeResult.refreshedValues == [.brightness: .int(42)])
     case let .failure(error):
         Issue.record("Expected success, got \(error)")
     }

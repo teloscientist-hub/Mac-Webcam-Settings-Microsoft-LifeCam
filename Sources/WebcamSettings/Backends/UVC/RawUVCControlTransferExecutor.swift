@@ -18,6 +18,7 @@ private let defaultCompletionTimeout: UInt32 = 1000
 struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
     private let serviceResolver: any RawUVCIOKitServiceResolving
     private let deviceInterfaceOpener: any RawUVCDeviceInterfaceOpening
+    private let legacyDeviceRequester = ProbeStyleLegacyUSBDeviceRequester()
 
     init(
         serviceResolver: any RawUVCIOKitServiceResolving = DefaultRawUVCIOKitServiceResolver(),
@@ -95,39 +96,20 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
         controlInterface: RawUVCEnumeratedInterface,
         openMode: RawUVCDeviceInterfacePlan.OpenMode
     ) throws -> Data {
-#if canImport(USBHostShim)
         var mutablePayload = payload ?? Data(count: transfer.expectedLength)
         let effectiveIndex = transfer.index(forControlInterfaceNumber: controlInterface.interfaceNumber)
-        let options: UInt64 = switch openMode {
-        case .standardOpen: 0
-        case .seizeIfNeeded: 1 << 1
-        }
-        let payloadLength = UInt16(mutablePayload.count)
 
         if let vendorID = transfer.target.vendorID,
-           let productID = transfer.target.productID {
-            let legacyResult = mutablePayload.withUnsafeMutableBytes { buffer in
-                WSUSBLegacyDeviceRequestTOForVIDPID(
-                    UInt32(vendorID),
-                    UInt32(productID),
-                    openMode == .seizeIfNeeded,
-                    transfer.requestType,
-                    transfer.request,
-                    transfer.value,
-                    effectiveIndex,
-                    buffer.baseAddress,
-                    payloadLength,
-                    defaultNoDataTimeout,
-                    defaultCompletionTimeout
-                )
-            }
-
-            guard legacyResult.status == kIOReturnSuccess else {
-                throw mapIOReturn(
-                    IOReturn(legacyResult.status),
-                    context: "Legacy IOUSBDevice DeviceRequestTO failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
-                )
-            }
+           let productID = transfer.target.productID,
+           shouldPreferLegacyDeviceRequest(for: transfer) {
+            try performLegacyDeviceRequest(
+                vendorID: UInt16(vendorID),
+                productID: UInt16(productID),
+                transfer: transfer,
+                effectiveIndex: effectiveIndex,
+                payload: &mutablePayload,
+                openMode: openMode
+            )
 
             switch transfer.direction {
             case .deviceToHost:
@@ -136,6 +118,13 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
                 return Data()
             }
         }
+
+#if canImport(USBHostShim)
+        let options: UInt64 = switch openMode {
+        case .standardOpen: 0
+        case .seizeIfNeeded: 1 << 1
+        }
+        let payloadLength = UInt16(mutablePayload.count)
 
         let result = mutablePayload.withUnsafeMutableBytes { buffer in
             WSUSBHostSendDeviceRequest(
@@ -151,26 +140,62 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
         }
 
         if result.status != kIOReturnSuccess {
-            let legacyInterfaceResult = mutablePayload.withUnsafeMutableBytes { buffer in
-                WSUSBDeviceInterfaceSendRequestTO(
-                    resolvedService.registryEntryID,
-                    openMode == .seizeIfNeeded,
-                    transfer.requestType,
-                    transfer.request,
-                    transfer.value,
-                    effectiveIndex,
-                    buffer.baseAddress,
-                    payloadLength,
-                    defaultNoDataTimeout,
-                    defaultCompletionTimeout
-                )
-            }
+            if let vendorID = transfer.target.vendorID,
+               let productID = transfer.target.productID {
+                do {
+                    try performLegacyDeviceRequest(
+                        vendorID: UInt16(vendorID),
+                        productID: UInt16(productID),
+                        transfer: transfer,
+                        effectiveIndex: effectiveIndex,
+                        payload: &mutablePayload,
+                        openMode: openMode
+                    )
+                } catch {
+                    let legacyInterfaceResult = mutablePayload.withUnsafeMutableBytes { buffer in
+                        WSUSBDeviceInterfaceSendRequestTO(
+                            resolvedService.registryEntryID,
+                            openMode == .seizeIfNeeded,
+                            transfer.requestType,
+                            transfer.request,
+                            transfer.value,
+                            effectiveIndex,
+                            buffer.baseAddress,
+                            payloadLength,
+                            defaultNoDataTimeout,
+                            defaultCompletionTimeout
+                        )
+                    }
 
-            guard legacyInterfaceResult.status == kIOReturnSuccess else {
-                throw mapIOReturn(
-                    IOReturn(legacyInterfaceResult.status),
-                    context: "IOUSBHost device request failed and registry-based IOUSBLib DeviceRequestTO fallback failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
-                )
+                    guard legacyInterfaceResult.status == kIOReturnSuccess else {
+                        throw mapIOReturn(
+                            IOReturn(legacyInterfaceResult.status),
+                            context: "IOUSBHost device request failed and registry-based IOUSBLib DeviceRequestTO fallback failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
+                        )
+                    }
+                }
+            } else {
+                let legacyInterfaceResult = mutablePayload.withUnsafeMutableBytes { buffer in
+                    WSUSBDeviceInterfaceSendRequestTO(
+                        resolvedService.registryEntryID,
+                        openMode == .seizeIfNeeded,
+                        transfer.requestType,
+                        transfer.request,
+                        transfer.value,
+                        effectiveIndex,
+                        buffer.baseAddress,
+                        payloadLength,
+                        defaultNoDataTimeout,
+                        defaultCompletionTimeout
+                    )
+                }
+
+                guard legacyInterfaceResult.status == kIOReturnSuccess else {
+                    throw mapIOReturn(
+                        IOReturn(legacyInterfaceResult.status),
+                        context: "IOUSBHost device request failed and registry-based IOUSBLib DeviceRequestTO fallback failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
+                    )
+                }
             }
         }
 
@@ -186,8 +211,58 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
         _ = resolvedService
         _ = controlInterface
         _ = openMode
-        throw CameraControlError.backendFailure("IOUSBHost device request support is unavailable in this build.")
+        throw CameraControlError.backendFailure("Direct USB device request support is unavailable in this build.")
 #endif
+    }
+
+    private func performLegacyDeviceRequest(
+        vendorID: UInt16,
+        productID: UInt16,
+        transfer: RawUVCControlTransfer.Plan,
+        effectiveIndex: UInt16,
+        payload: inout Data,
+        openMode: RawUVCDeviceInterfacePlan.OpenMode
+    ) throws {
+        let legacyResult = legacyDeviceRequester.sendRequest(
+            vendorID: vendorID,
+            productID: productID,
+            seize: openMode == .seizeIfNeeded,
+            requestType: transfer.requestType,
+            request: transfer.request,
+            value: transfer.value,
+            index: effectiveIndex,
+            payload: &payload,
+            noDataTimeout: defaultNoDataTimeout,
+            completionTimeout: defaultCompletionTimeout
+        )
+
+        guard legacyResult.status == kIOReturnSuccess else {
+            throw mapIOReturn(
+                IOReturn(legacyResult.status),
+                context: "Probe-style legacy IOUSBDevice DeviceRequestTO failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
+            )
+        }
+    }
+
+    private func shouldPreferLegacyDeviceRequest(for transfer: RawUVCControlTransfer.Plan) -> Bool {
+        let looksLikeLifeCamStudio =
+            transfer.target.vendorID == 0x045E &&
+            (transfer.target.productName?.localizedCaseInsensitiveContains("LifeCam Studio") == true)
+
+        guard looksLikeLifeCamStudio else {
+            return false
+        }
+
+        switch transfer.requestPlan.key {
+        case .brightness, .contrast, .saturation, .sharpness,
+             .whiteBalanceAuto, .whiteBalanceTemperature,
+             .focusAuto, .focus,
+             .exposureMode, .exposureTime,
+             .zoom:
+            return true
+        case .powerLineFrequency, .backlightCompensation, .pan, .tilt:
+            return false
+        }
     }
 
     private func performControlRequest(

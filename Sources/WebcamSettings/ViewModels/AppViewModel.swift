@@ -29,7 +29,7 @@ final class AppViewModel: ObservableObject {
     @Published var profileDraftName = ""
     @Published var preferences = AppPreferences()
     @Published var selectedTab: Tab = .basic
-    @Published var statusMessage = "Scaffold ready. Select a device to begin."
+    @Published var statusMessage = "Loading camera state..."
     @Published var lastErrorMessage: String?
     @Published var previewSession: AVCaptureSession?
     @Published var connectionState: ConnectionState = .loading
@@ -49,6 +49,9 @@ final class AppViewModel: ObservableObject {
     private var deviceUpdatesTask: Task<Void, Never>?
     private var lifecycleEventsTask: Task<Void, Never>?
     private let writeCoordinator: ControlWriteCoordinator
+    #if canImport(IOKit)
+    private let directZoomRequester = LegacyDirectUVCControlRequester()
+    #endif
     private var hasAttemptedStartupProfileLoad = false
     private var lastConnectedDeviceIDs: Set<String> = []
 
@@ -134,6 +137,48 @@ final class AppViewModel: ObservableObject {
             return "No camera-assistant ownership detected"
         }
         return "Control interface owner: \(selectedDevice.controlInterfaceOwner ?? "UVCAssistant"). Direct writes are blocked by macOS Camera Assistant on this Tahoe system."
+    }
+
+    var debugCompatibilitySummary: String {
+        guard let selectedDevice else {
+            return "No webcam selected"
+        }
+
+        if selectedDevice.isMicrosoftLifeCamStudio {
+            return "Validated device profile: Microsoft LifeCam Studio"
+        }
+
+        if selectedDevice.transportType != .usb {
+            return "Non-USB camera. Raw UVC control support is unlikely."
+        }
+
+        let mappedCount = RawUVCBindings.mappedControls(for: selectedDevice).count
+        if mappedCount == 0 {
+            return "Unverified USB webcam. No mapped raw controls yet."
+        }
+
+        return "Unverified USB webcam. \(mappedCount) generic raw controls mapped for testing."
+    }
+
+    var compatibilityNotice: String? {
+        guard let selectedDevice else {
+            return nil
+        }
+
+        if selectedDevice.isMicrosoftLifeCamStudio {
+            return nil
+        }
+
+        if selectedDevice.transportType != .usb {
+            return "Selected camera is not a USB webcam. Preview may still work, but raw UVC control coverage is limited."
+        }
+
+        let mappedCount = RawUVCBindings.mappedControls(for: selectedDevice).count
+        if mappedCount == 0 {
+            return "This webcam has no mapped raw controls yet. Use it as a discovery target first, then add device-specific mappings after validation."
+        }
+
+        return "This webcam is using generic UVC mappings. Control layout is ready for testing, but each writable control still needs device-specific validation."
     }
 
     var selectedProfileMatchDescription: String {
@@ -233,6 +278,16 @@ final class AppViewModel: ObservableObject {
         observeDeviceUpdates()
         observeLifecycleEvents()
         preferences = await dependencies.preferencesService.loadPreferences()
+        let savedLaunchAtLogin = preferences.launchAtLogin
+        let currentLaunchAtLogin = dependencies.launchAtLoginService.isEnabled()
+        if savedLaunchAtLogin != currentLaunchAtLogin {
+            do {
+                try dependencies.launchAtLoginService.setEnabled(savedLaunchAtLogin)
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+        }
+        preferences.launchAtLogin = dependencies.launchAtLoginService.isEnabled()
         preferencesViewModel.preferences = preferences
         await refreshDevices()
         await refreshProfiles()
@@ -282,39 +337,163 @@ final class AppViewModel: ObservableObject {
         inFlightControls.insert(key)
         controlErrorMessages[key] = nil
 
-        Task {
+        Task { @MainActor in
+            if shouldUseDedicatedZoomWritePath(key: key, device: selectedDevice) {
+                await performDedicatedZoomWrite(
+                    value,
+                    key: key,
+                    capability: capability,
+                    device: selectedDevice,
+                    previousValue: previousValue
+                )
+                return
+            }
+
+            let shouldResumePreview = shouldSuspendPreviewForControlWrite(key: key, device: selectedDevice) && previewSession != nil
+            if shouldResumePreview {
+                await dependencies.previewService.stopPreview()
+                previewSession = nil
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
+
             let result = await writeCoordinator.write(value, key: key, capability: capability, device: selectedDevice)
 
-            await MainActor.run {
-                self.inFlightControls.remove(key)
-                switch result {
-                case let .success(writeResult):
-                    if let refreshedValues = writeResult.refreshedValues {
-                        self.currentValues = self.mergedCurrentValues(
-                            existing: self.currentValues,
-                            refreshed: refreshedValues,
-                            capabilities: self.capabilities,
-                            lastWrittenKey: key,
-                            lastWrittenValue: value
-                        )
-                    }
-                    self.controlErrorMessages[key] = nil
-                    self.lastErrorMessage = nil
-                    self.statusMessage = "Updated \(key.displayName)"
-                    self.syncTabViewModels()
-                case let .failure(error):
-                    if let previousValue {
-                        self.currentValues[key] = previousValue
-                    } else {
-                        self.currentValues.removeValue(forKey: key)
-                    }
-                    let renderedError = self.renderedControlWriteError(error, key: key, device: selectedDevice)
-                    self.controlErrorMessages[key] = renderedError
-                    self.lastErrorMessage = renderedError
-                    self.statusMessage = self.renderedControlWriteStatus(error, key: key, device: selectedDevice)
-                    self.syncTabViewModels()
+            self.inFlightControls.remove(key)
+            switch result {
+            case let .success(writeResult):
+                if let refreshedValues = writeResult.refreshedValues {
+                    self.currentValues = self.mergedCurrentValues(
+                        existing: self.currentValues,
+                        refreshed: refreshedValues,
+                        capabilities: self.capabilities,
+                        lastWrittenKey: key,
+                        lastWrittenValue: value
+                    )
+                }
+                self.controlErrorMessages[key] = nil
+                self.lastErrorMessage = nil
+                self.statusMessage = "Updated \(key.displayName)"
+                self.syncTabViewModels()
+            case let .failure(error):
+                if let previousValue {
+                    self.currentValues[key] = previousValue
+                } else {
+                    self.currentValues.removeValue(forKey: key)
+                }
+                let renderedError = self.renderedControlWriteError(error, key: key, device: selectedDevice)
+                self.controlErrorMessages[key] = renderedError
+                self.lastErrorMessage = renderedError
+                self.statusMessage = self.renderedControlWriteStatus(error, key: key, device: selectedDevice)
+                self.syncTabViewModels()
+            }
+
+            if shouldResumePreview, self.selectedDeviceID == selectedDevice.id {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                do {
+                    self.previewSession = try await self.dependencies.previewService.startPreview(for: selectedDevice)
+                    self.lastPreviewError = nil
+                } catch let error as CameraControlError {
+                    self.lastPreviewError = error
+                } catch {
+                    self.lastPreviewError = .backendFailure(error.localizedDescription)
                 }
             }
+        }
+    }
+
+    private func shouldUseDedicatedZoomWritePath(key: CameraControlKey, device: CameraDeviceDescriptor) -> Bool {
+        device.isMicrosoftLifeCamStudio && key == .zoom
+    }
+
+    private func performDedicatedZoomWrite(
+        _ value: CameraControlValue,
+        key: CameraControlKey,
+        capability: CameraControlCapability?,
+        device: CameraDeviceDescriptor,
+        previousValue: CameraControlValue?
+    ) async {
+        let shouldResumePreview = previewSession != nil
+
+        if shouldResumePreview {
+            await dependencies.previewService.stopPreview()
+            previewSession = nil
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+        }
+
+        do {
+            #if canImport(IOKit)
+            let readBackValue = try directZoomRequester.writeAndReadBack(
+                value: value,
+                key: key,
+                device: device,
+                seize: true
+            )
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            currentValues[key] = readBackValue
+            #else
+            try await dependencies.cameraControlService.writeValue(value, for: key, device: device)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            currentValues[key] = value
+            #endif
+
+            controlErrorMessages[key] = nil
+            lastErrorMessage = nil
+            statusMessage = "Updated \(key.displayName)"
+            syncTabViewModels()
+        } catch let error as CameraControlError {
+            if let previousValue {
+                currentValues[key] = previousValue
+            } else if let defaultValue = capability?.currentValue {
+                currentValues[key] = defaultValue
+            } else {
+                currentValues.removeValue(forKey: key)
+            }
+            let renderedError = renderedControlWriteError(error, key: key, device: device)
+            controlErrorMessages[key] = renderedError
+            lastErrorMessage = renderedError
+            statusMessage = renderedControlWriteStatus(error, key: key, device: device)
+            syncTabViewModels()
+        } catch {
+            if let previousValue {
+                currentValues[key] = previousValue
+            } else if let defaultValue = capability?.currentValue {
+                currentValues[key] = defaultValue
+            } else {
+                currentValues.removeValue(forKey: key)
+            }
+            let cameraError = CameraControlError.backendFailure(error.localizedDescription)
+            let renderedError = renderedControlWriteError(cameraError, key: key, device: device)
+            controlErrorMessages[key] = renderedError
+            lastErrorMessage = renderedError
+            statusMessage = renderedControlWriteStatus(cameraError, key: key, device: device)
+            syncTabViewModels()
+        }
+
+        inFlightControls.remove(key)
+
+        if shouldResumePreview, selectedDeviceID == device.id {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            do {
+                previewSession = try await dependencies.previewService.startPreview(for: device)
+                lastPreviewError = nil
+            } catch let error as CameraControlError {
+                lastPreviewError = error
+            } catch {
+                lastPreviewError = .backendFailure(error.localizedDescription)
+            }
+        }
+    }
+
+    private func shouldSuspendPreviewForControlWrite(key: CameraControlKey, device: CameraDeviceDescriptor) -> Bool {
+        guard device.isMicrosoftLifeCamStudio else {
+            return false
+        }
+
+        switch key {
+        case .zoom:
+            return true
+        default:
+            return false
         }
     }
 
@@ -323,6 +502,9 @@ final class AppViewModel: ObservableObject {
         key: CameraControlKey,
         device: CameraDeviceDescriptor
     ) -> String {
+        if isLifeCamBadStateFailure(error, device: device) {
+            return "\(device.name) needs a USB reset before \(key.displayName) can respond again. Unplug the webcam, wait a few seconds, and plug it back in."
+        }
         if isTahoeCameraAssistantOwnershipFailure(error, device: device) {
             return "macOS Tahoe is currently holding the \(device.name) UVC control interface through Camera Assistant, so direct \(key.displayName) writes are blocked."
         }
@@ -334,6 +516,9 @@ final class AppViewModel: ObservableObject {
         key: CameraControlKey,
         device: CameraDeviceDescriptor
     ) -> String {
+        if isLifeCamBadStateFailure(error, device: device) {
+            return "\(key.displayName) needs a webcam replug"
+        }
         if isTahoeCameraAssistantOwnershipFailure(error, device: device) {
             return "\(key.displayName) is blocked by macOS Camera Assistant ownership"
         }
@@ -353,11 +538,31 @@ final class AppViewModel: ObservableObject {
             return true
         case let .backendFailure(message):
             let normalized = message.lowercased()
+            guard normalized.contains("0xe0004051") == false else {
+                return false
+            }
             return normalized.contains("uvcassistant")
                 || normalized.contains("camera assistant")
                 || normalized.contains("uvcservice")
                 || normalized.contains("0xe00002c5")
                 || normalized.contains("selected camera is busy")
+        default:
+            return false
+        }
+    }
+
+    private func isLifeCamBadStateFailure(
+        _ error: CameraControlError,
+        device: CameraDeviceDescriptor
+    ) -> Bool {
+        guard RawUVCBindings.canAttemptDirectAccess(for: device),
+              device.isMicrosoftLifeCamStudio else {
+            return false
+        }
+
+        switch error {
+        case let .backendFailure(message):
+            return message.lowercased().contains("0xe0004051")
         default:
             return false
         }
@@ -385,6 +590,14 @@ final class AppViewModel: ObservableObject {
         let previousPreferences = preferences
         var updated = preferencesViewModel.preferences
         updated.controlTestMode = false
+        do {
+            if updated.launchAtLogin != previousPreferences.launchAtLogin {
+                try dependencies.launchAtLoginService.setEnabled(updated.launchAtLogin)
+            }
+        } catch {
+            updated.launchAtLogin = dependencies.launchAtLoginService.isEnabled()
+            lastErrorMessage = error.localizedDescription
+        }
         preferences = updated
         preferencesViewModel.preferences = updated
 
@@ -502,13 +715,24 @@ final class AppViewModel: ObservableObject {
 
         Task {
             let matchScore = selectedDevice.matchScore(for: selectedProfile.deviceMatch)
-            let result = await dependencies.profileApplyingService.apply(profile: selectedProfile, to: selectedDevice)
-            await MainActor.run {
-                if result.items.contains(where: { $0.status == .failed }) {
-                    self.statusMessage = "Profile applied with issues"
-                } else if result.skippedCount > 0 {
-                    self.statusMessage = "Applied \(result.succeededCount) control(s), skipped \(result.skippedCount)"
-                } else if matchScore == 0 {
+        let result = await dependencies.profileApplyingService.apply(profile: selectedProfile, to: selectedDevice)
+        let refreshedValues = await refreshedHardwareValues(for: selectedDevice)
+        await MainActor.run {
+            if let refreshedValues {
+                self.currentValues = self.mergedCurrentValues(
+                    existing: self.currentValues,
+                    refreshed: refreshedValues,
+                    capabilities: self.capabilities,
+                    lastWrittenKey: nil,
+                    lastWrittenValue: nil
+                )
+                self.syncTabViewModels()
+            }
+            if result.items.contains(where: { $0.status == .failed }) {
+                self.statusMessage = "Profile applied with issues"
+            } else if result.skippedCount > 0 {
+                self.statusMessage = "Applied \(result.succeededCount) control(s), skipped \(result.skippedCount)"
+            } else if matchScore == 0 {
                     self.statusMessage = "Applied profile to a non-matching device"
                 } else {
                     self.statusMessage = "Applied \(result.succeededCount) control(s) from \(selectedProfile.name)"
@@ -575,18 +799,6 @@ final class AppViewModel: ObservableObject {
         lastControlsError = nil
 
         do {
-            previewSession = try await dependencies.previewService.startPreview(for: selectedDevice)
-        } catch let error as CameraControlError {
-            previewSession = nil
-            lastPreviewError = error
-            dependencies.logger.error("Preview failed for \(selectedDevice.name): \(error.localizedDescription)")
-        } catch {
-            previewSession = nil
-            lastPreviewError = .backendFailure(error.localizedDescription)
-            dependencies.logger.error("Preview failed for \(selectedDevice.name): \(error.localizedDescription)")
-        }
-
-        do {
             let resolvedCapabilities = try await dependencies.cameraControlService.fetchCapabilities(for: selectedDevice)
             capabilities = preferences.showUnsupportedControls
                 ? resolvedCapabilities
@@ -594,37 +806,35 @@ final class AppViewModel: ObservableObject {
             currentValues = seededCurrentValues(from: capabilities)
             syncTabViewModels()
 
-            if RawUVCBindings.canAttemptDirectAccess(for: selectedDevice) == false {
-                do {
-                    let refreshedValues = try await dependencies.cameraControlService.readCurrentValues(for: selectedDevice)
-                    currentValues = mergedCurrentValues(
-                        existing: currentValues,
-                        refreshed: refreshedValues,
-                        capabilities: capabilities,
-                        lastWrittenKey: nil,
-                        lastWrittenValue: nil
-                    )
-                } catch let error as CameraControlError {
-                    currentValues = mergedCurrentValues(
-                        existing: currentValues,
-                        refreshed: [:],
-                        capabilities: capabilities,
-                        lastWrittenKey: nil,
-                        lastWrittenValue: nil
-                    )
-                    lastControlsError = error
-                    dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
-                } catch {
-                    currentValues = mergedCurrentValues(
-                        existing: currentValues,
-                        refreshed: [:],
-                        capabilities: capabilities,
-                        lastWrittenKey: nil,
-                        lastWrittenValue: nil
-                    )
-                    lastControlsError = .backendFailure(error.localizedDescription)
-                    dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
-                }
+            do {
+                let refreshedValues = try await dependencies.cameraControlService.readCurrentValues(for: selectedDevice)
+                currentValues = mergedCurrentValues(
+                    existing: currentValues,
+                    refreshed: refreshedValues,
+                    capabilities: capabilities,
+                    lastWrittenKey: nil,
+                    lastWrittenValue: nil
+                )
+            } catch let error as CameraControlError {
+                currentValues = mergedCurrentValues(
+                    existing: currentValues,
+                    refreshed: [:],
+                    capabilities: capabilities,
+                    lastWrittenKey: nil,
+                    lastWrittenValue: nil
+                )
+                lastControlsError = error
+                dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
+            } catch {
+                currentValues = mergedCurrentValues(
+                    existing: currentValues,
+                    refreshed: [:],
+                    capabilities: capabilities,
+                    lastWrittenKey: nil,
+                    lastWrittenValue: nil
+                )
+                lastControlsError = .backendFailure(error.localizedDescription)
+                dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
             }
         } catch let error as CameraControlError {
             capabilities = []
@@ -636,6 +846,18 @@ final class AppViewModel: ObservableObject {
             currentValues = [:]
             lastControlsError = .backendFailure(error.localizedDescription)
             dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
+        }
+
+        do {
+            previewSession = try await dependencies.previewService.startPreview(for: selectedDevice)
+        } catch let error as CameraControlError {
+            previewSession = nil
+            lastPreviewError = error
+            dependencies.logger.error("Preview failed for \(selectedDevice.name): \(error.localizedDescription)")
+        } catch {
+            previewSession = nil
+            lastPreviewError = .backendFailure(error.localizedDescription)
+            dependencies.logger.error("Preview failed for \(selectedDevice.name): \(error.localizedDescription)")
         }
 
         syncTabViewModels()
@@ -653,6 +875,12 @@ final class AppViewModel: ObservableObject {
         if outcome.connectionState == .connected {
             dependencies.logger.info("Selection loaded for \(selectedDevice.name) with \(capabilities.count) capabilities")
             await attemptStartupProfileLoadIfNeeded()
+        }
+
+        if let lastControlsError, isLifeCamBadStateFailure(lastControlsError, device: selectedDevice) {
+            statusMessage = "Webcam needs a USB reset"
+            lastErrorMessage = "\(selectedDevice.name) stopped responding to raw control reads. Unplug the webcam, wait a few seconds, and plug it back in."
+            connectionState = .partialControlAccess
         }
 
         isRefreshingSelection = false
@@ -754,7 +982,18 @@ final class AppViewModel: ObservableObject {
 
         guard preferences.autoReapplyOnReconnect, let selectedProfile, let selectedDevice else { return }
         let result = await dependencies.profileApplyingService.apply(profile: selectedProfile, to: selectedDevice)
+        let refreshedValues = await refreshedHardwareValues(for: selectedDevice)
         await MainActor.run {
+            if let refreshedValues {
+                self.currentValues = self.mergedCurrentValues(
+                    existing: self.currentValues,
+                    refreshed: refreshedValues,
+                    capabilities: self.capabilities,
+                    lastWrittenKey: nil,
+                    lastWrittenValue: nil
+                )
+                self.syncTabViewModels()
+            }
             if result.items.contains(where: { $0.status == .failed }) {
                 self.lastErrorMessage = "Reconnect recovery reapplied with issues"
                 self.statusMessage = "Camera reconnected with partial recovery"
@@ -788,9 +1027,20 @@ final class AppViewModel: ObservableObject {
 
         hasAttemptedStartupProfileLoad = true
         let result = await dependencies.profileApplyingService.apply(profile: startupProfile, to: selectedDevice)
+        let refreshedValues = await refreshedHardwareValues(for: selectedDevice)
         await MainActor.run {
             self.selectedProfileID = startupProfile.id
             self.profileDraftName = startupProfile.name
+            if let refreshedValues {
+                self.currentValues = self.mergedCurrentValues(
+                    existing: self.currentValues,
+                    refreshed: refreshedValues,
+                    capabilities: self.capabilities,
+                    lastWrittenKey: nil,
+                    lastWrittenValue: nil
+                )
+                self.syncTabViewModels()
+            }
             if result.items.contains(where: { $0.status == .failed }) {
                 self.statusMessage = "Startup profile applied with issues"
             } else if result.skippedCount > 0 {
@@ -804,6 +1054,10 @@ final class AppViewModel: ObservableObject {
     private func profileMatchScore(_ profile: CameraProfile) -> Int {
         guard let selectedDevice else { return 0 }
         return selectedDevice.matchScore(for: profile.deviceMatch)
+    }
+
+    private func refreshedHardwareValues(for device: CameraDeviceDescriptor) async -> [CameraControlKey: CameraControlValue]? {
+        try? await dependencies.cameraControlService.refreshCurrentState(for: device)
     }
 
     private func mergedCurrentValues(
@@ -824,15 +1078,65 @@ final class AppViewModel: ObservableObject {
             merged[key] = value
         }
 
+        let capabilityMap = Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key, $0) })
         for (key, value) in refreshed {
-            merged[key] = value
+            guard let capability = capabilityMap[key] else {
+                merged[key] = value
+                continue
+            }
+
+            if isValidCurrentValue(value, for: capability) {
+                merged[key] = value
+            }
         }
 
-        if let lastWrittenKey, let lastWrittenValue, refreshed[lastWrittenKey] == nil {
+        if let lastWrittenKey, let lastWrittenValue {
             merged[lastWrittenKey] = lastWrittenValue
         }
 
         return merged
+    }
+
+    private func isValidCurrentValue(_ value: CameraControlValue, for capability: CameraControlCapability) -> Bool {
+        switch capability.type {
+        case .boolean:
+            if case .bool = value {
+                return true
+            }
+            return false
+
+        case .enumSelection:
+            guard case let .enumCase(rawValue) = value else {
+                return false
+            }
+            return capability.enumOptions.isEmpty || capability.enumOptions.contains(where: { $0.value == rawValue })
+
+        case .integerRange, .floatRange:
+            let resolved: Double
+            switch value {
+            case let .int(intValue):
+                resolved = Double(intValue)
+            case let .double(doubleValue):
+                resolved = doubleValue
+            default:
+                return false
+            }
+
+            let minValue = numericValue(from: capability.minValue) ?? resolved
+            let maxValue = numericValue(from: capability.maxValue) ?? resolved
+            return resolved >= minValue && resolved <= maxValue
+        }
+    }
+
+    private func numericValue(from value: CameraControlValue?) -> Double? {
+        switch value {
+        case let .int(intValue):
+            return Double(intValue)
+        case let .double(doubleValue):
+            return doubleValue
+        default:
+            return nil
+        }
     }
 
     private func seededCurrentValues(from capabilities: [CameraControlCapability]) -> [CameraControlKey: CameraControlValue] {

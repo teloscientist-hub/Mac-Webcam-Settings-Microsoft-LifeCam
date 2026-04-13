@@ -33,9 +33,7 @@ actor SyntheticRawUVCCameraBackend: UVCCameraBackend {
     }
 
     func readCurrentValues(for device: CameraDeviceDescriptor) async throws -> [CameraControlKey : CameraControlValue] {
-        let plans = RawUVCBindings
-            .mappedControls(for: device)
-            .compactMap { RawUVCBindings.requestPlan(for: $0.key, device: device, operation: .getCurrent) }
+        let plans = readablePlans(for: device)
 
         var values = seededValues(for: device)
         var firstError: CameraControlError?
@@ -94,5 +92,13 @@ actor SyntheticRawUVCCameraBackend: UVCCameraBackend {
         }
 
         return values
+    }
+
+    private func readablePlans(for device: CameraDeviceDescriptor) -> [RawUVCBindings.RequestPlan] {
+        let supportedKeys = BackendCapabilityCatalog.backendProfile(for: device).supportedKeys
+        return RawUVCBindings
+            .mappedControls(for: device)
+            .filter { supportedKeys.contains($0.key) && $0.isReadable }
+            .compactMap { RawUVCBindings.requestPlan(for: $0.key, device: device, operation: .getCurrent) }
     }
 }
