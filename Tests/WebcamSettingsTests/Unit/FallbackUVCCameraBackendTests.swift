@@ -66,13 +66,17 @@ func fallbackBackendUsesFallbackWhenPreferredReadFails() async throws {
     let fallback = RecordingBackend(mode: .succeed)
     let backend = FallbackUVCCameraBackend(preferred: preferred, fallback: fallback)
 
-    let values = try await backend.readCurrentValues(for: makeFallbackDevice())
+    do {
+        _ = try await backend.readCurrentValues(for: makeFallbackDevice())
+        Issue.record("Expected raw-capable read failure to propagate without in-memory fallback")
+    } catch let error as CameraControlError {
+        #expect(error == .backendFailure("preferred read failed"))
+    }
 
-    #expect(values[.brightness] == .int(42))
     let preferredReads = await preferred.readCount
     let fallbackReads = await fallback.readCount
     #expect(preferredReads == 1)
-    #expect(fallbackReads == 1)
+    #expect(fallbackReads == 0)
 }
 
 @Test
@@ -81,12 +85,17 @@ func fallbackBackendUsesFallbackWhenPreferredWriteFails() async throws {
     let fallback = RecordingBackend(mode: .succeed)
     let backend = FallbackUVCCameraBackend(preferred: preferred, fallback: fallback)
 
-    try await backend.writeValue(.int(55), for: .brightness, device: makeFallbackDevice())
+    do {
+        try await backend.writeValue(.int(55), for: .brightness, device: makeFallbackDevice())
+        Issue.record("Expected raw-capable write failure to propagate without in-memory fallback")
+    } catch let error as CameraControlError {
+        #expect(error == .backendFailure("preferred write failed"))
+    }
 
     let preferredWrites = await preferred.writeCount
     let fallbackWrites = await fallback.writeCount
     #expect(preferredWrites == 1)
-    #expect(fallbackWrites == 1)
+    #expect(fallbackWrites == 0)
 }
 
 private func makeFallbackDevice() -> CameraDeviceDescriptor {

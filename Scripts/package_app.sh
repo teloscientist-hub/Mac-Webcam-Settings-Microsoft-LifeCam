@@ -20,5 +20,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$SOURCE_BINARY" "$MACOS_DIR/WebcamSettings"
 cp "$INFO_PLIST_SOURCE" "$CONTENTS_DIR/Info.plist"
 chmod +x "$MACOS_DIR/WebcamSettings"
+xattr -cr "$APP_DIR" || true
+codesign --force --sign - --identifier com.compoundintelligence.webcamsettings "$APP_DIR"
 
 echo "$APP_DIR"

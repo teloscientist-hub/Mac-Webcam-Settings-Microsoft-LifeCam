@@ -121,7 +121,7 @@ struct ControlRow: View {
             return "Unsupported on the selected device."
         }
         if capability.isWritable == false {
-            return "This control is read-only for the selected device."
+            return capability.availabilityNote ?? "This control is read-only for the selected device."
         }
         guard let dependency = capability.dependency, !isEnabled else {
             return nil

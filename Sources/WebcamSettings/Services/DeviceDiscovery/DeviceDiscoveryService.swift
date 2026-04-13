@@ -33,6 +33,7 @@ actor DeviceDiscoveryService: DeviceDiscoveryServicing {
                 vendorID: usbMetadata?.vendorID,
                 productID: usbMetadata?.productID,
                 serialNumber: usbMetadata?.serialNumber,
+                controlInterfaceOwner: usbMetadata?.controlInterfaceOwner,
                 transportType: transportType(for: $0),
                 isConnected: true,
                 avFoundationUniqueID: $0.uniqueID,

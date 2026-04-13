@@ -7,6 +7,7 @@ struct BackendControlCapability: Sendable {
     let isSupported: Bool
     let isReadable: Bool
     let isWritable: Bool
+    let availabilityNote: String?
     let minValue: CameraControlValue?
     let maxValue: CameraControlValue?
     let stepValue: CameraControlValue?
@@ -21,6 +22,7 @@ struct BackendControlCapability: Sendable {
         isSupported: Bool,
         isReadable: Bool,
         isWritable: Bool,
+        availabilityNote: String? = nil,
         minValue: CameraControlValue?,
         maxValue: CameraControlValue?,
         stepValue: CameraControlValue?,
@@ -34,6 +36,7 @@ struct BackendControlCapability: Sendable {
         self.isSupported = isSupported
         self.isReadable = isReadable
         self.isWritable = isWritable
+        self.availabilityNote = availabilityNote
         self.minValue = minValue
         self.maxValue = maxValue
         self.stepValue = stepValue
@@ -81,6 +84,7 @@ enum BackendCapabilityCatalog {
                 isSupported: isSupported,
                 isReadable: isSupported,
                 isWritable: isSupported,
+                availabilityNote: nil,
                 minValue: override?.minValue ?? capability.minValue,
                 maxValue: override?.maxValue ?? capability.maxValue,
                 stepValue: override?.stepValue ?? capability.stepValue,
@@ -124,6 +128,7 @@ actor InMemoryUVCCameraBackend: UVCCameraBackend {
                 isSupported: capability.isSupported,
                 isReadable: capability.isReadable,
                 isWritable: capability.isWritable,
+                availabilityNote: capability.availabilityNote,
                 minValue: capability.minValue,
                 maxValue: capability.maxValue,
                 stepValue: capability.stepValue,
@@ -200,24 +205,33 @@ actor InMemoryUVCCameraBackend: UVCCameraBackend {
 private extension BackendDeviceProfile {
     static let lifeCamStudio = BackendDeviceProfile(
         name: "Microsoft LifeCam Studio",
-        supportedKeys: Set(CameraControlKey.allCases),
+        supportedKeys: [
+            .exposureMode, .exposureTime,
+            .brightness, .contrast, .saturation, .sharpness,
+            .whiteBalanceAuto, .whiteBalanceTemperature,
+            .powerLineFrequency, .backlightCompensation,
+            .focusAuto, .focus, .zoom
+        ],
         overrides: [
-            .exposureTime: .init(minValue: .int(1), maxValue: .int(200), stepValue: .int(1), defaultValue: .int(78), currentValue: .int(78), enumOptions: nil),
+            .exposureTime: .init(minValue: .int(1), maxValue: .int(10_000), stepValue: .int(1), defaultValue: .int(156), currentValue: .int(156), enumOptions: nil),
             .brightness: .init(minValue: .int(30), maxValue: .int(255), stepValue: .int(1), defaultValue: .int(133), currentValue: .int(133), enumOptions: nil),
-            .contrast: .init(minValue: .int(0), maxValue: .int(10), stepValue: .int(1), defaultValue: .int(5), currentValue: .int(5), enumOptions: nil),
-            .saturation: .init(minValue: .int(0), maxValue: .int(200), stepValue: .int(1), defaultValue: .int(100), currentValue: .int(100), enumOptions: nil),
-            .sharpness: .init(minValue: .int(0), maxValue: .int(100), stepValue: .int(1), defaultValue: .int(50), currentValue: .int(50), enumOptions: nil),
-            .whiteBalanceTemperature: .init(minValue: .int(2300), maxValue: .int(7500), stepValue: .int(50), defaultValue: .int(4600), currentValue: .int(4600), enumOptions: nil),
-            .backlightCompensation: .init(minValue: .int(0), maxValue: .int(10), stepValue: .int(1), defaultValue: .int(1), currentValue: .int(1), enumOptions: nil),
-            .focus: .init(minValue: .int(0), maxValue: .int(40), stepValue: .int(1), defaultValue: .int(12), currentValue: .int(12), enumOptions: nil),
-            .zoom: .init(minValue: .int(100), maxValue: .int(400), stepValue: .int(1), defaultValue: .int(100), currentValue: .int(100), enumOptions: nil),
-            .pan: .init(minValue: .int(-180), maxValue: .int(180), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(0), enumOptions: nil),
-            .tilt: .init(minValue: .int(-45), maxValue: .int(45), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(0), enumOptions: nil),
+            .contrast: .init(minValue: .int(0), maxValue: .int(10), stepValue: .int(1), defaultValue: .int(5), currentValue: .int(1), enumOptions: nil),
+            .saturation: .init(minValue: .int(0), maxValue: .int(200), stepValue: .int(1), defaultValue: .int(103), currentValue: .int(95), enumOptions: nil),
+            .sharpness: .init(minValue: .int(0), maxValue: .int(50), stepValue: .int(1), defaultValue: .int(25), currentValue: .int(50), enumOptions: nil),
+            .whiteBalanceTemperature: .init(minValue: .int(2500), maxValue: .int(10_000), stepValue: .int(1), defaultValue: .int(4500), currentValue: .int(3700), enumOptions: nil),
+            .backlightCompensation: .init(minValue: .int(0), maxValue: .int(10), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(4), enumOptions: nil),
+            .focus: .init(minValue: .int(0), maxValue: .int(40), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(16), enumOptions: nil),
+            .zoom: .init(minValue: .int(0), maxValue: .int(317), stepValue: .int(1), defaultValue: .int(0), currentValue: .int(0), enumOptions: nil),
             .powerLineFrequency: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .enumCase("60hz"), currentValue: .enumCase("60hz"), enumOptions: [
                 .init(id: "disabled", title: "Disabled", value: "disabled"),
                 .init(id: "50hz", title: "50 Hz", value: "50hz"),
-                .init(id: "60hz", title: "60 Hz", value: "60hz"),
-                .init(id: "auto", title: "Auto", value: "auto")
+                .init(id: "60hz", title: "60 Hz", value: "60hz")
+            ]),
+            .whiteBalanceAuto: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .bool(true), currentValue: .bool(true), enumOptions: nil),
+            .focusAuto: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .bool(true), currentValue: .bool(false), enumOptions: nil),
+            .exposureMode: .init(minValue: nil, maxValue: nil, stepValue: nil, defaultValue: .enumCase("auto"), currentValue: .enumCase("manual"), enumOptions: [
+                .init(id: "auto", title: "Auto", value: "auto"),
+                .init(id: "manual", title: "Manual", value: "manual")
             ])
         ]
     )

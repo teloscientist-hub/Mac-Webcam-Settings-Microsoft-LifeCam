@@ -24,7 +24,12 @@ actor ControlWriteCoordinator {
         do {
             try validate(value: value, for: key, capability: capability)
             try await controlService.writeValue(value, for: key, device: device)
-            let refreshedValues = try? await controlService.refreshCurrentState(for: device)
+            let refreshedValues: [CameraControlKey: CameraControlValue]?
+            if RawUVCBindings.canAttemptDirectAccess(for: device) {
+                refreshedValues = nil
+            } else {
+                refreshedValues = try? await controlService.refreshCurrentState(for: device)
+            }
             logger.info("Wrote control \(key.rawValue)")
             await debugStore.record(category: "write", message: "Wrote control \(key.rawValue)")
             return .success(WriteResult(refreshedValues: refreshedValues))

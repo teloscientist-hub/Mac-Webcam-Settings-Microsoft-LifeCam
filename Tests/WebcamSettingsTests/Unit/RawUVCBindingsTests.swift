@@ -17,7 +17,7 @@ func rawBindingsExposeSpecificDescriptorForLifeCamControl() {
 
     #expect(descriptor?.entity == .processingUnit)
     #expect(descriptor?.selector == 0x0A)
-    #expect(descriptor?.unitID == 0x02)
+    #expect(descriptor?.unitID == 0x04)
 }
 
 @Test
@@ -30,7 +30,7 @@ func rawBindingsBuildSetCurrentRequestPlanForMappedControl() {
 
     #expect(plan?.entity == .processingUnit)
     #expect(plan?.selector == 0x02)
-    #expect(plan?.unitID == 0x02)
+    #expect(plan?.unitID == 0x04)
     #expect(plan?.expectedLength == 2)
     #expect(plan?.operation == .setCurrent)
 }
@@ -101,7 +101,7 @@ func rawBindingsTreatUSBDeviceAsRawCandidateEvenBeforeImplementation() {
     #expect(RawUVCBindings.canAttemptDirectAccess(for: device) == true)
     #expect(RawUVCBindings.backendSummary(for: device).contains("Raw UVC candidate"))
     #expect(RawUVCBindings.mappingSummary(for: device).contains("mapped controls"))
-    #expect(RawUVCBindings.pipelineSummary(for: device).contains("Capabilities from raw mapping catalog"))
+    #expect(RawUVCBindings.pipelineSummary(for: device).contains("IOUSBHost-based raw transport"))
 }
 
 private func makeRawLifeCam() -> CameraDeviceDescriptor {

@@ -16,8 +16,8 @@ func getCurrentTransferPlanUsesDeviceToHostUVCRequestShape() throws {
     #expect(transfer.request == 0x81)
     #expect(transfer.requestType == 0xA1)
     #expect(transfer.value == 0x0200)
-    #expect(transfer.index == 0x0002)
-    #expect(transfer.index(forControlInterfaceNumber: 3) == 0x0302)
+    #expect(transfer.index == 0x0004)
+    #expect(transfer.index(forControlInterfaceNumber: 3) == 0x0403)
     #expect(transfer.expectedLength == 2)
 }
 
@@ -37,7 +37,7 @@ func setCurrentTransferPlanUsesHostToDeviceUVCRequestShape() throws {
     #expect(transfer.requestType == 0x21)
     #expect(transfer.value == 0x0800)
     #expect(transfer.index == 0x0001)
-    #expect(transfer.index(forControlInterfaceNumber: 4) == 0x0401)
+    #expect(transfer.index(forControlInterfaceNumber: 4) == 0x0104)
     #expect(transfer.expectedLength == 1)
 }
 

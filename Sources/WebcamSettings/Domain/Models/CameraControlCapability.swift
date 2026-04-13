@@ -13,6 +13,7 @@ struct CameraControlCapability: Identifiable, Codable, Hashable, Sendable {
     let isSupported: Bool
     let isReadable: Bool
     let isWritable: Bool
+    let availabilityNote: String?
     let minValue: CameraControlValue?
     let maxValue: CameraControlValue?
     let stepValue: CameraControlValue?
@@ -29,6 +30,7 @@ struct CameraControlCapability: Identifiable, Codable, Hashable, Sendable {
         isSupported: Bool,
         isReadable: Bool,
         isWritable: Bool,
+        availabilityNote: String? = nil,
         minValue: CameraControlValue?,
         maxValue: CameraControlValue?,
         stepValue: CameraControlValue?,
@@ -44,6 +46,7 @@ struct CameraControlCapability: Identifiable, Codable, Hashable, Sendable {
         self.isSupported = isSupported
         self.isReadable = isReadable
         self.isWritable = isWritable
+        self.availabilityNote = availabilityNote
         self.minValue = minValue
         self.maxValue = maxValue
         self.stepValue = stepValue

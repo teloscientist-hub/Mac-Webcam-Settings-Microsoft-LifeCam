@@ -7,6 +7,7 @@ import IOKit.usb.IOUSBLib
 struct RawUVCOpenedDeviceInterface: Sendable, Equatable {
     let registryEntryID: UInt64
     let configurationCount: UInt8
+    let deviceOpenResult: IOReturn?
     let interfaces: [RawUVCEnumeratedInterface]
     let controlInterface: RawUVCEnumeratedInterface?
 }
@@ -90,21 +91,21 @@ struct DefaultRawUVCDeviceInterfaceOpener: RawUVCDeviceInterfaceOpening {
             openResult = device.pointee.USBDeviceOpenSeize(deviceInterface)
         }
 
-        guard openResult == kIOReturnSuccess else {
-            throw CameraControlError.backendFailure(
-                "USBDeviceOpen failed for registry entry 0x\(String(format: "%016llX", resolvedService.registryEntryID)) with result 0x\(String(format: "%08X", openResult))."
-            )
-        }
-        defer {
-            _ = device.pointee.USBDeviceClose(deviceInterface)
+        let deviceIsOpen = openResult == kIOReturnSuccess
+        if deviceIsOpen {
+            defer {
+                _ = device.pointee.USBDeviceClose(deviceInterface)
+            }
         }
 
         var configurationCount: UInt8 = 0
-        let configResult = device.pointee.GetNumberOfConfigurations(deviceInterface, &configurationCount)
-        guard configResult == kIOReturnSuccess else {
-            throw CameraControlError.backendFailure(
-                "GetNumberOfConfigurations failed for registry entry 0x\(String(format: "%016llX", resolvedService.registryEntryID)) with result 0x\(String(format: "%08X", configResult))."
-            )
+        if deviceIsOpen {
+            let configResult = device.pointee.GetNumberOfConfigurations(deviceInterface, &configurationCount)
+            guard configResult == kIOReturnSuccess else {
+                throw CameraControlError.backendFailure(
+                    "GetNumberOfConfigurations failed for registry entry 0x\(String(format: "%016llX", resolvedService.registryEntryID)) with result 0x\(String(format: "%08X", configResult))."
+                )
+            }
         }
 
         let interfaces = try interfaceEnumerator.enumerate(deviceInterface: deviceInterface)
@@ -113,6 +114,7 @@ struct DefaultRawUVCDeviceInterfaceOpener: RawUVCDeviceInterfaceOpening {
         return RawUVCOpenedDeviceInterface(
             registryEntryID: resolvedService.registryEntryID,
             configurationCount: configurationCount,
+            deviceOpenResult: deviceIsOpen ? nil : openResult,
             interfaces: interfaces,
             controlInterface: controlInterface
         )

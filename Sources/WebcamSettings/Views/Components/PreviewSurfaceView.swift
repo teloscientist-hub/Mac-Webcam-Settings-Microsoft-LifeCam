@@ -22,6 +22,7 @@ final class PreviewContainerView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        layer = CALayer()
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
 

@@ -19,12 +19,16 @@ actor PreferencesService: PreferencesServicing {
             return AppPreferences()
         }
 
+        var sanitized = preferences
+        sanitized.controlTestMode = false
         await debugStore.record(category: "preferences", message: "Loaded app preferences")
-        return preferences
+        return sanitized
     }
 
     func savePreferences(_ preferences: AppPreferences) async {
-        if let data = try? JSONEncoder().encode(preferences) {
+        var sanitized = preferences
+        sanitized.controlTestMode = false
+        if let data = try? JSONEncoder().encode(sanitized) {
             defaults.set(data, forKey: key)
         }
         logger.info("Saved app preferences")

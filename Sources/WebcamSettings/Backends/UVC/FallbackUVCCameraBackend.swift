@@ -25,12 +25,19 @@ actor FallbackUVCCameraBackend: UVCCameraBackend {
     }
 
     func readCurrentValues(for device: CameraDeviceDescriptor) async throws -> [CameraControlKey: CameraControlValue] {
-        try await run(primaryOperation: "read values", for: device) { backend in
+        if RawUVCBindings.canAttemptDirectAccess(for: device) {
+            return try await preferred.readCurrentValues(for: device)
+        }
+        return try await run(primaryOperation: "read values", for: device) { backend in
             try await backend.readCurrentValues(for: device)
         }
     }
 
     func writeValue(_ value: CameraControlValue, for key: CameraControlKey, device: CameraDeviceDescriptor) async throws {
+        if RawUVCBindings.canAttemptDirectAccess(for: device) {
+            try await preferred.writeValue(value, for: key, device: device)
+            return
+        }
         let _: Void = try await run(primaryOperation: "write \(key.rawValue)", for: device) { backend in
             try await backend.writeValue(value, for: key, device: device)
         }

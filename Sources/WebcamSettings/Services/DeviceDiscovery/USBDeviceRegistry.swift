@@ -13,6 +13,7 @@ struct USBDeviceRegistry {
         let serialNumber: String?
         let registryEntryID: UInt64?
         let serviceClassName: String?
+        let controlInterfaceOwner: String?
     }
 
     static func metadata(matching localizedName: String, manufacturerHint: String?) -> Metadata? {
@@ -70,7 +71,11 @@ struct USBDeviceRegistry {
                     productID: copyIntProperty("idProduct", service: service),
                     serialNumber: copyStringProperty("USB Serial Number", service: service) ?? copyStringProperty("kUSBSerialNumberString", service: service),
                     registryEntryID: copyRegistryEntryID(service),
-                    serviceClassName: className
+                    serviceClassName: className,
+                    controlInterfaceOwner: copyControlInterfaceOwner(
+                        vendorID: copyIntProperty("idVendor", service: service),
+                        productID: copyIntProperty("idProduct", service: service)
+                    )
                 )
             )
         }
@@ -105,6 +110,40 @@ struct USBDeviceRegistry {
             return nil
         }
         return entryID
+    }
+
+    private static func copyControlInterfaceOwner(vendorID: Int?, productID: Int?) -> String? {
+        guard let vendorID, let productID else {
+            return nil
+        }
+
+        guard let matchingDictionary = IOServiceMatching("IOUSBHostInterface") else {
+            return nil
+        }
+
+        var iterator: io_iterator_t = 0
+        let result = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDictionary, &iterator)
+        guard result == KERN_SUCCESS else {
+            return nil
+        }
+        defer { IOObjectRelease(iterator) }
+
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            defer { IOObjectRelease(service) }
+            guard copyIntProperty("idVendor", service: service) == vendorID,
+                  copyIntProperty("idProduct", service: service) == productID,
+                  copyIntProperty("bInterfaceClass", service: service) == 0x0E,
+                  copyIntProperty("bInterfaceSubClass", service: service) == 0x01 else {
+                continue
+            }
+
+            let owner = copyStringProperty("UsbExclusiveOwner", service: service)
+            if owner?.isEmpty == false {
+                return owner
+            }
+        }
+
+        return nil
     }
 
     private static func namesMatch(lhs: String?, rhs: String?) -> Bool {

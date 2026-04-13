@@ -11,6 +11,7 @@ struct ControlCapabilityMapper: Sendable {
                 isSupported: capability.isSupported,
                 isReadable: capability.isReadable,
                 isWritable: capability.isWritable,
+                availabilityNote: capability.availabilityNote,
                 minValue: capability.minValue,
                 maxValue: capability.maxValue,
                 stepValue: capability.stepValue,

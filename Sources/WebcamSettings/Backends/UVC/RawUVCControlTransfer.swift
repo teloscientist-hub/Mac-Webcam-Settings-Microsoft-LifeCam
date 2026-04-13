@@ -21,7 +21,7 @@ enum RawUVCControlTransfer {
         }
 
         func index(forControlInterfaceNumber interfaceNumber: UInt8) -> UInt16 {
-            UInt16(interfaceNumber) << 8 | (index & 0x00FF)
+            (UInt16(index & 0x00FF) << 8) | UInt16(interfaceNumber)
         }
     }
 

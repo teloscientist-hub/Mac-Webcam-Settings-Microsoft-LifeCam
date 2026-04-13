@@ -126,6 +126,16 @@ final class AppViewModel: ObservableObject {
         RawUVCDeviceLocatorSupport.resolvedTargetSummary(for: selectedDevice)
     }
 
+    var debugOwnershipSummary: String {
+        guard let selectedDevice else {
+            return "No ownership warning"
+        }
+        guard selectedDevice.cameraAssistantOwnsControlInterface else {
+            return "No camera-assistant ownership detected"
+        }
+        return "Control interface owner: \(selectedDevice.controlInterfaceOwner ?? "UVCAssistant"). Direct writes are blocked by macOS Camera Assistant on this Tahoe system."
+    }
+
     var selectedProfileMatchDescription: String {
         guard let selectedProfile, let selectedDevice else {
             return "No profile selected"
@@ -274,12 +284,19 @@ final class AppViewModel: ObservableObject {
 
         Task {
             let result = await writeCoordinator.write(value, key: key, capability: capability, device: selectedDevice)
+
             await MainActor.run {
                 self.inFlightControls.remove(key)
                 switch result {
                 case let .success(writeResult):
                     if let refreshedValues = writeResult.refreshedValues {
-                        self.currentValues = refreshedValues
+                        self.currentValues = self.mergedCurrentValues(
+                            existing: self.currentValues,
+                            refreshed: refreshedValues,
+                            capabilities: self.capabilities,
+                            lastWrittenKey: key,
+                            lastWrittenValue: value
+                        )
                     }
                     self.controlErrorMessages[key] = nil
                     self.lastErrorMessage = nil
@@ -291,19 +308,85 @@ final class AppViewModel: ObservableObject {
                     } else {
                         self.currentValues.removeValue(forKey: key)
                     }
-                    self.controlErrorMessages[key] = error.localizedDescription
-                    self.lastErrorMessage = error.localizedDescription
-                    self.statusMessage = "Failed to update \(key.displayName)"
+                    let renderedError = self.renderedControlWriteError(error, key: key, device: selectedDevice)
+                    self.controlErrorMessages[key] = renderedError
+                    self.lastErrorMessage = renderedError
+                    self.statusMessage = self.renderedControlWriteStatus(error, key: key, device: selectedDevice)
                     self.syncTabViewModels()
                 }
             }
         }
     }
 
+    private func renderedControlWriteError(
+        _ error: CameraControlError,
+        key: CameraControlKey,
+        device: CameraDeviceDescriptor
+    ) -> String {
+        if isTahoeCameraAssistantOwnershipFailure(error, device: device) {
+            return "macOS Tahoe is currently holding the \(device.name) UVC control interface through Camera Assistant, so direct \(key.displayName) writes are blocked."
+        }
+        return error.localizedDescription
+    }
+
+    private func renderedControlWriteStatus(
+        _ error: CameraControlError,
+        key: CameraControlKey,
+        device: CameraDeviceDescriptor
+    ) -> String {
+        if isTahoeCameraAssistantOwnershipFailure(error, device: device) {
+            return "\(key.displayName) is blocked by macOS Camera Assistant ownership"
+        }
+        return "Failed to update \(key.displayName)"
+    }
+
+    private func isTahoeCameraAssistantOwnershipFailure(
+        _ error: CameraControlError,
+        device: CameraDeviceDescriptor
+    ) -> Bool {
+        guard RawUVCBindings.canAttemptDirectAccess(for: device) else {
+            return false
+        }
+
+        switch error {
+        case .deviceBusy:
+            return true
+        case let .backendFailure(message):
+            let normalized = message.lowercased()
+            return normalized.contains("uvcassistant")
+                || normalized.contains("camera assistant")
+                || normalized.contains("uvcservice")
+                || normalized.contains("0xe00002c5")
+                || normalized.contains("selected camera is busy")
+        default:
+            return false
+        }
+    }
+
+    private func restorePreviewAfterControlWrite(for device: CameraDeviceDescriptor) async {
+        guard selectedDeviceID == device.id else { return }
+
+        do {
+            let session = try await dependencies.previewService.startPreview(for: device)
+            previewSession = session
+            lastPreviewError = nil
+        } catch let error as CameraControlError {
+            previewSession = nil
+            lastPreviewError = error
+            dependencies.logger.error("Preview restart failed for \(device.name): \(error.localizedDescription)")
+        } catch {
+            previewSession = nil
+            lastPreviewError = .backendFailure(error.localizedDescription)
+            dependencies.logger.error("Preview restart failed for \(device.name): \(error.localizedDescription)")
+        }
+    }
+
     func savePreferences() {
         let previousPreferences = preferences
-        let updated = preferencesViewModel.preferences
+        var updated = preferencesViewModel.preferences
+        updated.controlTestMode = false
         preferences = updated
+        preferencesViewModel.preferences = updated
 
         if previousPreferences.showUnsupportedControls != updated.showUnsupportedControls {
             Task {
@@ -504,13 +587,45 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
-            async let fetchedCapabilities = dependencies.cameraControlService.fetchCapabilities(for: selectedDevice)
-            async let fetchedValues = dependencies.cameraControlService.readCurrentValues(for: selectedDevice)
-            let resolvedCapabilities = try await fetchedCapabilities
+            let resolvedCapabilities = try await dependencies.cameraControlService.fetchCapabilities(for: selectedDevice)
             capabilities = preferences.showUnsupportedControls
                 ? resolvedCapabilities
                 : resolvedCapabilities.filter(\.isSupported)
-            currentValues = try await fetchedValues
+            currentValues = seededCurrentValues(from: capabilities)
+            syncTabViewModels()
+
+            if RawUVCBindings.canAttemptDirectAccess(for: selectedDevice) == false {
+                do {
+                    let refreshedValues = try await dependencies.cameraControlService.readCurrentValues(for: selectedDevice)
+                    currentValues = mergedCurrentValues(
+                        existing: currentValues,
+                        refreshed: refreshedValues,
+                        capabilities: capabilities,
+                        lastWrittenKey: nil,
+                        lastWrittenValue: nil
+                    )
+                } catch let error as CameraControlError {
+                    currentValues = mergedCurrentValues(
+                        existing: currentValues,
+                        refreshed: [:],
+                        capabilities: capabilities,
+                        lastWrittenKey: nil,
+                        lastWrittenValue: nil
+                    )
+                    lastControlsError = error
+                    dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
+                } catch {
+                    currentValues = mergedCurrentValues(
+                        existing: currentValues,
+                        refreshed: [:],
+                        capabilities: capabilities,
+                        lastWrittenKey: nil,
+                        lastWrittenValue: nil
+                    )
+                    lastControlsError = .backendFailure(error.localizedDescription)
+                    dependencies.logger.error("Controls failed for \(selectedDevice.name): \(error.localizedDescription)")
+                }
+            }
         } catch let error as CameraControlError {
             capabilities = []
             currentValues = [:]
@@ -689,5 +804,45 @@ final class AppViewModel: ObservableObject {
     private func profileMatchScore(_ profile: CameraProfile) -> Int {
         guard let selectedDevice else { return 0 }
         return selectedDevice.matchScore(for: profile.deviceMatch)
+    }
+
+    private func mergedCurrentValues(
+        existing: [CameraControlKey: CameraControlValue],
+        refreshed: [CameraControlKey: CameraControlValue],
+        capabilities: [CameraControlCapability],
+        lastWrittenKey: CameraControlKey?,
+        lastWrittenValue: CameraControlValue?
+    ) -> [CameraControlKey: CameraControlValue] {
+        var merged: [CameraControlKey: CameraControlValue] = Dictionary(
+            uniqueKeysWithValues: capabilities.compactMap { capability in
+                guard let value = capability.currentValue else { return nil }
+                return (capability.key, value)
+            }
+        )
+
+        for (key, value) in existing {
+            merged[key] = value
+        }
+
+        for (key, value) in refreshed {
+            merged[key] = value
+        }
+
+        if let lastWrittenKey, let lastWrittenValue, refreshed[lastWrittenKey] == nil {
+            merged[lastWrittenKey] = lastWrittenValue
+        }
+
+        return merged
+    }
+
+    private func seededCurrentValues(from capabilities: [CameraControlCapability]) -> [CameraControlKey: CameraControlValue] {
+        Dictionary(
+            uniqueKeysWithValues: capabilities.compactMap { capability in
+                guard let value = capability.currentValue ?? capability.defaultValue else {
+                    return nil
+                }
+                return (capability.key, value)
+            }
+        )
     }
 }

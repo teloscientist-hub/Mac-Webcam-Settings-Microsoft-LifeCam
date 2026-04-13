@@ -37,6 +37,7 @@ func ioKitExecutorIncludesResolvedContextWhenControlRequestCannotStart() async t
                 RawUVCOpenedDeviceInterface(
                     registryEntryID: 0x1234,
                     configurationCount: 1,
+                    deviceOpenResult: nil,
                     interfaces: [
                         RawUVCEnumeratedInterface(
                             registryEntryID: 0x4321,
@@ -83,14 +84,18 @@ func ioKitExecutorIncludesResolvedContextWhenControlRequestCannotStart() async t
 
     do {
         _ = try await executor.execute(transfer: transfer, payload: nil)
-        Issue.record("Expected IOKit executor to stop after resolution")
+        Issue.record("Expected IOKit executor to fail after exhausting its transport fallbacks")
     } catch let error as CameraControlError {
         if case let .backendFailure(message) = error {
             #expect(message.contains("for Microsoft, Microsoft LifeCam Studio"))
             #expect(message.contains("interface plan: seizeIfNeeded"))
             #expect(message.contains("deviceInterface=kIOUSBDeviceInterfaceID942"))
             #expect(message.contains("selected control interface: if=0 alt=0 class=0x0E subclass=0x01"))
-            #expect(message.contains("Could not reacquire the selected control interface service"))
+            #expect(
+                message.contains("Could not reacquire the selected control interface service")
+                    || message.contains("IOUSBHost device request failed")
+                    || message.contains("DeviceRequestTO fallback failed")
+            )
         } else {
             Issue.record("Expected backend failure from IOKit executor")
         }
@@ -108,6 +113,7 @@ func ioKitExecutorPropagatesResolverFailures() async throws {
                 RawUVCOpenedDeviceInterface(
                     registryEntryID: 0x1234,
                     configurationCount: 1,
+                    deviceOpenResult: nil,
                     interfaces: [],
                     controlInterface: nil
                 )

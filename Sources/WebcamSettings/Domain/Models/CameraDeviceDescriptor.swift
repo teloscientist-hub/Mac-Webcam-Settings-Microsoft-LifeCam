@@ -8,10 +8,39 @@ struct CameraDeviceDescriptor: Identifiable, Codable, Hashable, Sendable {
     let vendorID: Int?
     let productID: Int?
     let serialNumber: String?
+    let controlInterfaceOwner: String?
     let transportType: CameraTransportType
     let isConnected: Bool
     let avFoundationUniqueID: String?
     let backendIdentifier: String?
+
+    init(
+        id: String,
+        name: String,
+        manufacturer: String?,
+        model: String?,
+        vendorID: Int?,
+        productID: Int?,
+        serialNumber: String?,
+        controlInterfaceOwner: String? = nil,
+        transportType: CameraTransportType,
+        isConnected: Bool,
+        avFoundationUniqueID: String?,
+        backendIdentifier: String?
+    ) {
+        self.id = id
+        self.name = name
+        self.manufacturer = manufacturer
+        self.model = model
+        self.vendorID = vendorID
+        self.productID = productID
+        self.serialNumber = serialNumber
+        self.controlInterfaceOwner = controlInterfaceOwner
+        self.transportType = transportType
+        self.isConnected = isConnected
+        self.avFoundationUniqueID = avFoundationUniqueID
+        self.backendIdentifier = backendIdentifier
+    }
 
     func matchScore(for match: ProfileDeviceMatch) -> Int {
         var score = 0
@@ -56,6 +85,13 @@ struct CameraDeviceDescriptor: Identifiable, Codable, Hashable, Sendable {
         let vendor = vendorID.map { String(format: "0x%04X", $0) } ?? "n/a"
         let product = productID.map { String(format: "0x%04X", $0) } ?? "n/a"
         return "VID \(vendor) • PID \(product)"
+    }
+
+    var cameraAssistantOwnsControlInterface: Bool {
+        guard let controlInterfaceOwner else {
+            return false
+        }
+        return controlInterfaceOwner.localizedCaseInsensitiveContains("uvcassistant")
     }
 }
 

@@ -49,7 +49,7 @@ enum RawUVCBindings {
         let isWritable: Bool
     }
 
-    static let isImplemented = false
+    static let isImplemented = true
 
     static func canAttemptDirectAccess(for device: CameraDeviceDescriptor) -> Bool {
         guard device.transportType == .usb else { return false }
@@ -226,7 +226,7 @@ enum RawUVCBindings {
         }
 
         if canAttemptDirectAccess(for: device) {
-            return "Capabilities from raw mapping catalog; live reads and writes still fall back until direct UVC transport is implemented."
+            return "Capabilities come from the raw mapping catalog, and live device requests now route through IOUSBHost-based raw transport."
         }
 
         if device.transportType == .usb {
@@ -262,14 +262,14 @@ enum RawUVCBindings {
         .init(key: .zoom, entity: .cameraTerminal, selector: 0x0B, unitID: 0x01, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
         .init(key: .pan, entity: .cameraTerminal, selector: 0x0D, unitID: 0x01, length: 4, valueType: .integerRange, isReadable: true, isWritable: true),
         .init(key: .tilt, entity: .cameraTerminal, selector: 0x0D, unitID: 0x01, length: 4, valueType: .integerRange, isReadable: true, isWritable: true),
-        .init(key: .brightness, entity: .processingUnit, selector: 0x02, unitID: 0x02, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
-        .init(key: .contrast, entity: .processingUnit, selector: 0x03, unitID: 0x02, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
-        .init(key: .saturation, entity: .processingUnit, selector: 0x07, unitID: 0x02, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
-        .init(key: .sharpness, entity: .processingUnit, selector: 0x08, unitID: 0x02, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
-        .init(key: .whiteBalanceAuto, entity: .processingUnit, selector: 0x0B, unitID: 0x02, length: 1, valueType: .boolean, isReadable: true, isWritable: true),
-        .init(key: .whiteBalanceTemperature, entity: .processingUnit, selector: 0x0A, unitID: 0x02, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
-        .init(key: .powerLineFrequency, entity: .processingUnit, selector: 0x05, unitID: 0x02, length: 1, valueType: .enumSelection, isReadable: true, isWritable: true),
-        .init(key: .backlightCompensation, entity: .processingUnit, selector: 0x01, unitID: 0x02, length: 2, valueType: .integerRange, isReadable: true, isWritable: true)
+        .init(key: .brightness, entity: .processingUnit, selector: 0x02, unitID: 0x04, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
+        .init(key: .contrast, entity: .processingUnit, selector: 0x03, unitID: 0x04, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
+        .init(key: .saturation, entity: .processingUnit, selector: 0x07, unitID: 0x04, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
+        .init(key: .sharpness, entity: .processingUnit, selector: 0x08, unitID: 0x04, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
+        .init(key: .whiteBalanceAuto, entity: .processingUnit, selector: 0x0B, unitID: 0x04, length: 1, valueType: .boolean, isReadable: true, isWritable: true),
+        .init(key: .whiteBalanceTemperature, entity: .processingUnit, selector: 0x0A, unitID: 0x04, length: 2, valueType: .integerRange, isReadable: true, isWritable: true),
+        .init(key: .powerLineFrequency, entity: .processingUnit, selector: 0x05, unitID: 0x04, length: 1, valueType: .enumSelection, isReadable: true, isWritable: true),
+        .init(key: .backlightCompensation, entity: .processingUnit, selector: 0x01, unitID: 0x04, length: 2, valueType: .integerRange, isReadable: true, isWritable: true)
     ]
 
     private static let genericUSBDescriptors: [ControlDescriptor] = [

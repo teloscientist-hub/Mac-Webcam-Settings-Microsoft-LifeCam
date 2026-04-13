@@ -25,6 +25,12 @@ Current live-test caveats:
 - preview permission and control loading can now fail independently, so partial-access states are more honest than earlier all-or-nothing loading
 - USB metadata enrichment is best-effort and currently matched heuristically from the USB registry to the AVFoundation camera name
 - the legacy `Webcam Settings` utility should be closed during live testing to avoid camera/control contention
+- on this Tahoe Mac, the LifeCam video-control interface is exposed as `IOUSBHostInterface` class/subclass `14/1` and is owned by `UVCAssistant`
+- direct brightness writes now reach the real hardware path, but both device-request and interface-request routes fail with busy ownership errors such as `0xE00002C5`
+- the standalone `WebcamSettingsRawProbe` shows a split result:
+  - legacy `IOCreatePlugInInterfaceForService` can fail on the matched LifeCam service
+  - `IOServiceOpen(type: 0)` succeeds on both `IOUSBDevice` and `IOUSBHostDevice`
+- Tahoe ships `com.apple.DriverKit-UVCUserService.dext`, and Apple's `UVCMatching.plist` applies `CameraAssistantConfiguration` / `UVCCameraHideControls` to external UVC cameras, which likely explains the persistent ownership barrier
 
 ## Backend reality
 
@@ -42,9 +48,10 @@ Still not implemented:
 - real UVC hardware read/write calls for the LifeCam
 - true capability probing from the physical device
 - verification that each legacy control maps correctly to actual hardware selectors on Tahoe
+- any direct integration with Tahoe's `UVCService` / `UVCUserService` path; the current app still attempts the legacy USB control route first
 
 ## Practical next step
 
 Highest-value next milestone:
 
-- replace the in-memory UVC backend with a real backend implementation while keeping the existing adapter/service/view-model/UI structure intact
+- determine whether Tahoe's private `UVCService` / `UVCUserService` path is callable from user space; if not, treat direct LifeCam control on modern Tahoe as OS-blocked and keep the app honest about that limitation

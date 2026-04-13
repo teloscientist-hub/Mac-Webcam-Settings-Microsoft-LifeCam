@@ -49,6 +49,7 @@ struct MainWindowView: View {
                     rawMappingSummary: viewModel.debugRawMappingSummary,
                     pipelineSummary: viewModel.debugPipelineSummary,
                     rawTargetSummary: viewModel.debugRawTargetSummary,
+                    ownershipSummary: viewModel.debugOwnershipSummary,
                     capabilities: viewModel.visibleCapabilities,
                     currentValues: viewModel.currentValues,
                     entries: viewModel.debugEntries
@@ -56,7 +57,7 @@ struct MainWindowView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 900, minHeight: 650)
+        .frame(minWidth: 980, minHeight: 650)
         .confirmationDialog(
             "Delete selected profile?",
             isPresented: $viewModel.showDeleteConfirmation,
@@ -72,36 +73,49 @@ struct MainWindowView: View {
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Webcam Settings")
-                    .font(.title.bold())
-                Text("Capability-driven LifeCam Studio replacement")
-                    .foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                headerTitle
+                Spacer(minLength: 12)
+                headerControls
             }
 
-            Spacer()
-
-            HStack(spacing: 10) {
-                Picker("Camera", selection: Binding(
-                    get: { viewModel.selectedDeviceID ?? "" },
-                    set: { viewModel.selectDevice(id: $0) }
-                )) {
-                    ForEach(viewModel.availableDevices) { device in
-                        Text(device.name).tag(device.id)
-                    }
-                }
-                .frame(width: 280)
-
-                ConnectionBadge(state: viewModel.connectionState)
-
-                Button("Refresh") {
-                    viewModel.refreshAll()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(viewModel.isRefreshingSelection)
+            VStack(alignment: .leading, spacing: 12) {
+                headerTitle
+                headerControls
             }
+        }
+    }
+
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Webcam Settings")
+                .font(.title.bold())
+            Text("Capability-driven LifeCam Studio replacement")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var headerControls: some View {
+        HStack(spacing: 10) {
+            Picker("Camera", selection: Binding(
+                get: { viewModel.selectedDeviceID ?? "" },
+                set: { viewModel.selectDevice(id: $0) }
+            )) {
+                ForEach(viewModel.availableDevices) { device in
+                    Text(device.name).tag(device.id)
+                }
+            }
+            .frame(minWidth: 220, idealWidth: 280, maxWidth: 320)
+
+            ConnectionBadge(state: viewModel.connectionState)
+
+            Button("Refresh") {
+                viewModel.refreshAll()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(viewModel.isRefreshingSelection)
         }
     }
 
@@ -110,7 +124,7 @@ struct MainWindowView: View {
             Text("Preview")
                 .font(.headline)
 
-            ZStack(alignment: .bottomLeading) {
+            ZStack {
                 PreviewSurfaceView(session: viewModel.previewSession)
 
                 if viewModel.previewSession == nil {
@@ -132,17 +146,6 @@ struct MainWindowView: View {
                     .padding(18)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.selectedDevice?.name ?? "No camera selected")
-                        .font(.subheadline.weight(.medium))
-                    Text(viewModel.statusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                .padding(12)
             }
             .frame(minHeight: 320)
             .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 16))

@@ -10,6 +10,7 @@ struct DebugPanel: View {
     let rawMappingSummary: String
     let pipelineSummary: String
     let rawTargetSummary: String
+    let ownershipSummary: String
     let capabilities: [CameraControlCapability]
     let currentValues: [CameraControlKey: CameraControlValue]
     let entries: [DebugStore.Entry]
@@ -60,6 +61,8 @@ struct DebugPanel: View {
             Text("Pipeline: \(pipelineSummary)")
                 .foregroundStyle(.secondary)
             Text("Raw Target: \(rawTargetSummary)")
+                .foregroundStyle(.secondary)
+            Text("Ownership: \(ownershipSummary)")
                 .foregroundStyle(.secondary)
         }
         .font(.caption)

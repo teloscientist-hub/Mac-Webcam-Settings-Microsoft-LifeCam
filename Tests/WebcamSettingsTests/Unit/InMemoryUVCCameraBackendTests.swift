@@ -7,6 +7,7 @@ func backendRejectsManualFocusWhileAutofocusEnabled() async throws {
     let device = makeBackendDevice()
 
     _ = try await backend.fetchCapabilities(for: device)
+    try await backend.writeValue(.bool(true), for: .focusAuto, device: device)
     do {
         try await backend.writeValue(.int(20), for: .focus, device: device)
         Issue.record("Expected autofocus dependency to reject manual focus write")
@@ -53,17 +54,16 @@ func backendMarksAdvancedControlsUnsupportedForGenericDevices() async throws {
 }
 
 @Test
-func lifeCamProfileUsesRicherWhiteBalanceAndPanTiltRanges() async throws {
+func lifeCamProfileUsesRicherWhiteBalanceRangeAndLeavesPanUnsupported() async throws {
     let backend = InMemoryUVCCameraBackend()
     let capabilities = try await backend.fetchCapabilities(for: makeBackendDevice())
 
     let whiteBalance = capabilities.first(where: { $0.key == .whiteBalanceTemperature })
     let pan = capabilities.first(where: { $0.key == .pan })
 
-    #expect(whiteBalance?.minValue == .int(2300))
-    #expect(whiteBalance?.maxValue == .int(7500))
-    #expect(pan?.minValue == .int(-180))
-    #expect(pan?.maxValue == .int(180))
+    #expect(whiteBalance?.minValue == .int(2500))
+    #expect(whiteBalance?.maxValue == .int(10_000))
+    #expect(pan?.isSupported == false)
 }
 
 @Test
@@ -85,9 +85,11 @@ func lifeCamVendorProductFingerprintSelectsLifeCamBackendProfile() async throws 
 
     let capabilities = try await backend.fetchCapabilities(for: disguisedLifeCam)
     let pan = capabilities.first(where: { $0.key == .pan })
+    let zoom = capabilities.first(where: { $0.key == .zoom })
 
-    #expect(pan?.isSupported == true)
-    #expect(pan?.maxValue == .int(180))
+    #expect(pan?.isSupported == false)
+    #expect(zoom?.isSupported == true)
+    #expect(zoom?.maxValue == .int(317))
 }
 
 private func makeBackendDevice() -> CameraDeviceDescriptor {

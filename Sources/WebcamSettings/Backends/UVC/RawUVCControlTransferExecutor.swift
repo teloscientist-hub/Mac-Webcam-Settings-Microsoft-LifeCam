@@ -7,6 +7,13 @@ protocol RawUVCControlTransferExecuting: Sendable {
 #if canImport(IOKit)
 import IOKit
 import IOKit.usb.IOUSBLib
+#if canImport(USBHostShim)
+import USBHostShim
+#endif
+
+private let usbHostPipeStalledResult = IOReturn(bitPattern: 0xE0005000)
+private let defaultNoDataTimeout: UInt32 = 500
+private let defaultCompletionTimeout: UInt32 = 1000
 
 struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
     private let serviceResolver: any RawUVCIOKitServiceResolving
@@ -27,35 +34,167 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
             resolvedService: resolvedService
         )
         let openedDevice = try deviceInterfaceOpener.open(plan: interfacePlan)
+        let deviceOpenSummary = openedDevice.deviceOpenResult.map {
+            "device-open unavailable (0x\(String(format: "%08X", $0)))"
+        } ?? "\(openedDevice.configurationCount) configurations"
         let interfaceSummary = openedDevice.interfaces.map(\.summary).joined(separator: "; ")
         let renderedInterfaceSummary = interfaceSummary.isEmpty ? "none" : interfaceSummary
         let selectedControlInterface = openedDevice.controlInterface?.summary ?? "none"
 
         guard let controlInterface = openedDevice.controlInterface else {
             throw CameraControlError.backendFailure(
-                "IOKit raw UVC executor resolved registry entry 0x\(String(format: "%016llX", resolvedService.registryEntryID)) for \(transfer.target.summary) and opened the USB device interface (\(openedDevice.configurationCount) configurations; interfaces: \(renderedInterfaceSummary)), but no UVC control interface was found (interface plan: \(interfacePlan.summary); transfer: \(transfer.summary))."
+                "IOKit raw UVC executor resolved registry entry 0x\(String(format: "%016llX", resolvedService.registryEntryID)) for \(transfer.target.summary) and prepared the USB device interface (\(deviceOpenSummary); interfaces: \(renderedInterfaceSummary)), but no UVC control interface was found (interface plan: \(interfacePlan.summary); transfer: \(transfer.summary))."
             )
         }
 
         do {
-            return try performControlRequest(
+            return try performDeviceRequest(
                 transfer: transfer,
                 payload: payload,
-                controlInterface: controlInterface
+                resolvedService: resolvedService,
+                controlInterface: controlInterface,
+                openMode: interfacePlan.preferredOpenMode
             )
-        } catch let error as CameraControlError {
-            let message = "IOKit raw UVC request failed after opening device/interface for \(transfer.target.summary) (selected control interface: \(selectedControlInterface); interface plan: \(interfacePlan.summary); transfer: \(transfer.summary)): \(error.localizedDescription)"
-            throw CameraControlError.backendFailure(message)
+        } catch let deviceError as CameraControlError {
+            do {
+                return try performControlRequest(
+                    transfer: transfer,
+                    payload: payload,
+                    controlInterface: controlInterface,
+                    openMode: interfacePlan.preferredOpenMode
+                )
+            } catch let interfaceError as CameraControlError {
+                let message = "IOKit raw UVC request failed after preparing device/interface for \(transfer.target.summary) (\(deviceOpenSummary); selected control interface: \(selectedControlInterface); interface plan: \(interfacePlan.summary); transfer: \(transfer.summary); device request path: \(deviceError.localizedDescription); interface request path: \(interfaceError.localizedDescription))"
+                throw CameraControlError.backendFailure(message)
+            } catch {
+                let message = "IOKit raw UVC request failed after preparing device/interface for \(transfer.target.summary) (\(deviceOpenSummary); selected control interface: \(selectedControlInterface); interface plan: \(interfacePlan.summary); transfer: \(transfer.summary); device request path: \(deviceError.localizedDescription); interface request path: \(error.localizedDescription))"
+                throw CameraControlError.backendFailure(message)
+            }
         } catch {
-            let message = "IOKit raw UVC request failed after opening device/interface for \(transfer.target.summary) (selected control interface: \(selectedControlInterface); interface plan: \(interfacePlan.summary); transfer: \(transfer.summary)): \(error.localizedDescription)"
-            throw CameraControlError.backendFailure(message)
+            do {
+                return try performControlRequest(
+                    transfer: transfer,
+                    payload: payload,
+                    controlInterface: controlInterface,
+                    openMode: interfacePlan.preferredOpenMode
+                )
+            } catch let interfaceError as CameraControlError {
+                let message = "IOKit raw UVC request failed after preparing device/interface for \(transfer.target.summary) (\(deviceOpenSummary); selected control interface: \(selectedControlInterface); interface plan: \(interfacePlan.summary); transfer: \(transfer.summary); device request path: \(error.localizedDescription); interface request path: \(interfaceError.localizedDescription))"
+                throw CameraControlError.backendFailure(message)
+            } catch {
+                let message = "IOKit raw UVC request failed after preparing device/interface for \(transfer.target.summary) (\(deviceOpenSummary); selected control interface: \(selectedControlInterface); interface plan: \(interfacePlan.summary); transfer: \(transfer.summary); device request path: \(error.localizedDescription); interface request path: \(error.localizedDescription))"
+                throw CameraControlError.backendFailure(message)
+            }
         }
+    }
+
+    private func performDeviceRequest(
+        transfer: RawUVCControlTransfer.Plan,
+        payload: Data?,
+        resolvedService: RawUVCResolvedIOKitService,
+        controlInterface: RawUVCEnumeratedInterface,
+        openMode: RawUVCDeviceInterfacePlan.OpenMode
+    ) throws -> Data {
+#if canImport(USBHostShim)
+        var mutablePayload = payload ?? Data(count: transfer.expectedLength)
+        let effectiveIndex = transfer.index(forControlInterfaceNumber: controlInterface.interfaceNumber)
+        let options: UInt64 = switch openMode {
+        case .standardOpen: 0
+        case .seizeIfNeeded: 1 << 1
+        }
+        let payloadLength = UInt16(mutablePayload.count)
+
+        if let vendorID = transfer.target.vendorID,
+           let productID = transfer.target.productID {
+            let legacyResult = mutablePayload.withUnsafeMutableBytes { buffer in
+                WSUSBLegacyDeviceRequestTOForVIDPID(
+                    UInt32(vendorID),
+                    UInt32(productID),
+                    openMode == .seizeIfNeeded,
+                    transfer.requestType,
+                    transfer.request,
+                    transfer.value,
+                    effectiveIndex,
+                    buffer.baseAddress,
+                    payloadLength,
+                    defaultNoDataTimeout,
+                    defaultCompletionTimeout
+                )
+            }
+
+            guard legacyResult.status == kIOReturnSuccess else {
+                throw mapIOReturn(
+                    IOReturn(legacyResult.status),
+                    context: "Legacy IOUSBDevice DeviceRequestTO failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
+                )
+            }
+
+            switch transfer.direction {
+            case .deviceToHost:
+                return mutablePayload
+            case .hostToDevice:
+                return Data()
+            }
+        }
+
+        let result = mutablePayload.withUnsafeMutableBytes { buffer in
+            WSUSBHostSendDeviceRequest(
+                resolvedService.registryEntryID,
+                options,
+                transfer.requestType,
+                transfer.request,
+                transfer.value,
+                effectiveIndex,
+                buffer.baseAddress,
+                payloadLength
+            )
+        }
+
+        if result.status != kIOReturnSuccess {
+            let legacyInterfaceResult = mutablePayload.withUnsafeMutableBytes { buffer in
+                WSUSBDeviceInterfaceSendRequestTO(
+                    resolvedService.registryEntryID,
+                    openMode == .seizeIfNeeded,
+                    transfer.requestType,
+                    transfer.request,
+                    transfer.value,
+                    effectiveIndex,
+                    buffer.baseAddress,
+                    payloadLength,
+                    defaultNoDataTimeout,
+                    defaultCompletionTimeout
+                )
+            }
+
+            guard legacyInterfaceResult.status == kIOReturnSuccess else {
+                throw mapIOReturn(
+                    IOReturn(legacyInterfaceResult.status),
+                    context: "IOUSBHost device request failed and registry-based IOUSBLib DeviceRequestTO fallback failed with effective index 0x\(String(format: "%04X", effectiveIndex))"
+                )
+            }
+        }
+
+        switch transfer.direction {
+        case .deviceToHost:
+            return mutablePayload
+        case .hostToDevice:
+            return Data()
+        }
+#else
+        _ = transfer
+        _ = payload
+        _ = resolvedService
+        _ = controlInterface
+        _ = openMode
+        throw CameraControlError.backendFailure("IOUSBHost device request support is unavailable in this build.")
+#endif
     }
 
     private func performControlRequest(
         transfer: RawUVCControlTransfer.Plan,
         payload: Data?,
-        controlInterface: RawUVCEnumeratedInterface
+        controlInterface: RawUVCEnumeratedInterface,
+        openMode: RawUVCDeviceInterfacePlan.OpenMode
     ) throws -> Data {
         guard let matching = IORegistryEntryIDMatching(controlInterface.registryEntryID) else {
             throw CameraControlError.backendFailure(
@@ -110,11 +249,17 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
             _ = interface.pointee.Release(interfacePointer)
         }
 
-        let openResult = interface.pointee.USBInterfaceOpen(interfacePointer)
+        let openResult: IOReturn
+        switch openMode {
+        case .standardOpen:
+            openResult = interface.pointee.USBInterfaceOpen(interfacePointer)
+        case .seizeIfNeeded:
+            openResult = interface.pointee.USBInterfaceOpenSeize(interfacePointer)
+        }
         guard openResult == kIOReturnSuccess else {
             throw mapIOReturn(
                 openResult,
-                context: "USBInterfaceOpen failed for interface \(controlInterface.summary)"
+                context: "USBInterfaceOpen failed for interface \(controlInterface.summary) using \(openMode.rawValue)"
             )
         }
         defer {
@@ -162,6 +307,8 @@ struct IOKitRawUVCControlTransferExecutor: RawUVCControlTransferExecuting {
             return .deviceBusy
         case kIOReturnTimeout:
             return .timedOut
+        case usbHostPipeStalledResult:
+            return .backendFailure("\(context) because the device stalled the request (0x\(String(format: "%08X", result))).")
         default:
             return .backendFailure("\(context) with result 0x\(String(format: "%08X", result)).")
         }

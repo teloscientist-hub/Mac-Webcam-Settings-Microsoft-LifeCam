@@ -10,6 +10,7 @@ struct AppPreferences: Codable, Equatable, Sendable {
     var startupProfileID: UUID?
     var autoReapplyOnReconnect: Bool = true
     var autoReapplyAfterWake: Bool = true
+    var controlTestMode: Bool = false
     var showUnsupportedControls: Bool = false
     var showDebugPanel: Bool = true
 }
